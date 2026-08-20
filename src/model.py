@@ -2,7 +2,7 @@ from mesa import Model, DataCollector
 
 from src.agent import Player
 from src.maps import default_map
-from src.types import CellName
+from src.domain import CellName
 
 
 class GameModel(Model):
@@ -76,8 +76,8 @@ class GameModel(Model):
         ]
 
     def _is_end_condition_met(self):
-        if self.victims_rescued >= 3:
-            return "3 victims rescued"
+        if self.victims_rescued >= 7:
+            return "7 victims rescued"
         if self.victims_killed >= 1:
             return "victim killed by fire"
         if self.steps >= self.max_steps:
@@ -99,5 +99,3 @@ class GameModel(Model):
         if reason:
             print(reason)
             self.running = False
-
-        self.steps += 1

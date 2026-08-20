@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from mesa import Agent
 
-from src.types import Action, CellName, Coord
+from src.domain import Action, CellName, Coord
 from src.utils import a_star, manhattan, valid_actions
 
 if TYPE_CHECKING:

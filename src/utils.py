@@ -3,7 +3,7 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING, Optional, TypedDict
 
-from src.types import Action, CellName, Coord
+from src.domain import Action, CellName, Coord
 
 if TYPE_CHECKING:
     from src.agent import Player
