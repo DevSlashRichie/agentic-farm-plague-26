@@ -1,11 +1,11 @@
 from mesa import Model, MultiGrid, RandomActivation, DataCollector
 
 from src.maps import default_map
-from src.types import CellName, MapData
+from src.types import CellName
 
 
 class GameModel(Model):
-    def __init__(self, agents=6, max_steps=50, map_data: MapData | None = None):
+    def __init__(self, agents=6, max_steps=50, map_data: list[list[str]] | None = None):
         super().__init__()
         if map_data is None:
             map_data = default_map()
@@ -26,9 +26,9 @@ class GameModel(Model):
             agent_reporters={"victims_rescued": lambda agent: agent.victims_rescued},
         )
 
-    def _load_map(self, map_data: MapData):
-        self.width = map_data["columns"]
-        self.height = map_data["rows"]
+    def _load_map(self, map_data: list[list[str]]):
+        self.height = len(map_data)
+        self.width = len(map_data[0]) if self.height else 0
         self.grid = MultiGrid(self.width, self.height, torus=False)
 
         self.grid_data = [
@@ -36,17 +36,9 @@ class GameModel(Model):
             for __ in range(self.width)
         ]
 
-        for y, row in enumerate(map_data["matrix"]):
+        for y, row in enumerate(map_data):
             for x, cell_name in enumerate(row):
                 self.grid_data[x][y] = {"name": CellName(cell_name)}
-
-        for door in map_data["doors"]:
-            r, c = door["between"][0]
-            self.grid_data[c - 1][r - 1] = {"name": CellName.DOOR}
-
-        for exit in map_data["exits"]:
-            r, c = exit["cell"]
-            self.grid_data[c - 1][r - 1] = {"name": CellName.EXIT}
 
         for x in range(self.width):
             for y in range(self.height):
