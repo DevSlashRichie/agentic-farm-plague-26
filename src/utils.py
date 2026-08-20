@@ -3,11 +3,11 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING, Optional, TypedDict
 
-from src.model import GameModel
 from src.types import Action, CellName, Coord
 
 if TYPE_CHECKING:
     from src.agent import Player
+    from src.model import GameModel
 
 
 class ActionOption(TypedDict):
@@ -35,7 +35,10 @@ def calc_action_score(
     cell_name = model.grid_data[x][y]["name"]
 
     if action == Action.MOVE:
-        if manhattan(from_pos, to_pos) != 1 or cell_name == CellName.FIRE:
+        if (
+            manhattan(from_pos, to_pos) != 1
+            or cell_name in (CellName.FIRE, CellName.DOOR, CellName.WALL)
+        ):
             return -1
         return 2 if carrying_victim else 1
 
