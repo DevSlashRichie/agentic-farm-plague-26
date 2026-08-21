@@ -20,6 +20,19 @@ def manhattan(a: Coord, b: Coord) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+def _edge(a: Coord, b: Coord) -> tuple[Coord, Coord]:
+    return (a, b) if a < b else (b, a)
+
+
+def _edge_blocked(model: GameModel, from_pos: Coord, to_pos: Coord) -> bool:
+    edge = _edge(from_pos, to_pos)
+    if edge in model.walls:
+        return True
+    if edge in model.doors and not model.doors[edge]:
+        return True
+    return False
+
+
 def calc_action_score(
     model: GameModel,
     action: Action,
@@ -35,10 +48,9 @@ def calc_action_score(
     cell_name = model.grid_data[x][y]["name"]
 
     if action == Action.MOVE:
-        if (
-            manhattan(from_pos, to_pos) != 1
-            or cell_name in (CellName.FIRE, CellName.DOOR, CellName.WALL)
-        ):
+        if manhattan(from_pos, to_pos) != 1 or cell_name == CellName.FIRE:
+            return -1
+        if _edge_blocked(model, from_pos, to_pos):
             return -1
         return 2 if carrying_victim else 1
 
@@ -46,10 +58,13 @@ def calc_action_score(
         return 1 if cell_name == CellName.FIRE else -1
 
     if action == Action.OPEN_DOOR:
-        return 1 if cell_name == CellName.DOOR else -1
+        edge = _edge(from_pos, to_pos)
+        if edge in model.doors and not model.doors[edge]:
+            return 1
+        return -1
 
     if action == Action.CHOP_WALL:
-        return 2 if cell_name == CellName.WALL else -1
+        return 2 if _edge(from_pos, to_pos) in model.walls else -1
 
     return -1
 
@@ -78,17 +93,17 @@ def valid_actions(
 
 
 def a_star(
-    grid_data: list[list[dict]],
+    model: GameModel,
     start: Coord,
     goal: Coord,
 ) -> Optional[list[Coord]]:
     """Find shortest path on a 2D grid using A* search.
 
-    Movement is 4-directional (up, down, left, right) with uniform step cost.
-    Cells with name FIRE, WALL, or DOOR are impassable.
+    Movement is 4-directional with uniform step cost. Considers walls, closed doors,
+    and fire cells as impassable.
 
     Args:
-        grid_data: 2D grid of cell dicts (`grid_data[x][y]`) with key "name".
+        model: GameModel holding grid_data, walls, doors.
         start: (x, y) starting coordinate.
         goal: (x, y) target coordinate.
 
@@ -98,20 +113,20 @@ def a_star(
     if start == goal:
         return [start]
 
-    width = len(grid_data)
-    height = len(grid_data[0]) if width else 0
-
-    impassable = {CellName.FIRE, CellName.WALL, CellName.DOOR}
+    width = model.width
+    height = model.height
 
     def in_bounds(c: Coord) -> bool:
         x, y = c
         return 0 <= x < width and 0 <= y < height
 
     def passable(c: Coord) -> bool:
-        x, y = c
         if not in_bounds(c):
             return False
-        return grid_data[x][y]["name"] not in impassable
+        x, y = c
+        if model.grid_data[x][y]["name"] == CellName.FIRE:
+            return False
+        return True
 
     open_set: list[tuple[int, int, Coord]] = []
     counter = 0
@@ -139,6 +154,8 @@ def a_star(
         for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
             neighbor = (nx, ny)
             if not in_bounds(neighbor) or not passable(neighbor):
+                continue
+            if _edge_blocked(model, current, neighbor):
                 continue
             tentative_g = g_score[current] + 1
             if neighbor not in g_score or tentative_g < g_score[neighbor]:

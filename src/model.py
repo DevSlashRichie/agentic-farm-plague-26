@@ -2,11 +2,11 @@ from mesa import Model, DataCollector
 
 from src.agent import Player
 from src.maps import default_map
-from src.domain import CellName
+from src.domain import CellName, Coord, MapData
 
 
 class GameModel(Model):
-    def __init__(self, agents=6, max_steps=50, map_data: list[list[str]] | None = None):
+    def __init__(self, agents=6, max_steps=50, map_data: MapData | None = None):
         super().__init__()
         if map_data is None:
             map_data = default_map()
@@ -28,16 +28,23 @@ class GameModel(Model):
             },
         )
 
-    def _load_map(self, map_data: list[list[str]]):
-        self.height = len(map_data)
-        self.width = len(map_data[0]) if self.height else 0
+    def _edge(self, a: Coord, b: Coord) -> tuple[Coord, Coord]:
+        return (a, b) if a < b else (b, a)
+
+    def _rc_to_xy(self, rc: list[int]) -> Coord:
+        r, c = rc
+        return (c - 1, r - 1)
+
+    def _load_map(self, map_data: MapData):
+        self.width = map_data["columns"]
+        self.height = map_data["rows"]
 
         self.grid_data = [
             [{"name": CellName.NONE} for _ in range(self.height)]
             for __ in range(self.width)
         ]
 
-        for y, row in enumerate(map_data):
+        for y, row in enumerate(map_data["matrix"]):
             for x, cell_name in enumerate(row):
                 self.grid_data[x][y] = {"name": CellName(cell_name)}
 
@@ -45,6 +52,16 @@ class GameModel(Model):
             for y in range(self.height):
                 if self.grid_data[x][y]["name"] == CellName.UNKNOWN:
                     self.grid_data[x][y]["hidden"] = CellName.VICTIM
+
+        self.walls: set[tuple[Coord, Coord]] = set()
+        for pair in map_data["walls"]:
+            a, b = self._rc_to_xy(pair[0]), self._rc_to_xy(pair[1])
+            self.walls.add(self._edge(a, b))
+
+        self.doors: dict[tuple[Coord, Coord], bool] = {}
+        for pair in map_data["doors"]:
+            a, b = self._rc_to_xy(pair[0]), self._rc_to_xy(pair[1])
+            self.doors[self._edge(a, b)] = False
 
     def _spawn_agents(self, count: int):
         exits = self.get_cells_by_name(CellName.EXIT)

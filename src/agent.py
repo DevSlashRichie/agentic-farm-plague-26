@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from mesa import Agent
 
 from src.domain import Action, CellName, Coord
-from src.utils import a_star, manhattan, valid_actions
+from src.utils import _edge, a_star, manhattan, valid_actions
 
 if TYPE_CHECKING:
     from src.model import GameModel
@@ -68,11 +68,11 @@ class Player(Agent):
             if action == Action.MOVE:
                 self.pos = coord
             elif action == Action.OPEN_DOOR:
-                self.model.grid_data[coord[0]][coord[1]] = {"name": CellName.NONE}
+                self.model.doors[_edge(self.pos, coord)] = True
             elif action == Action.EXTINGUISH:
                 self.model.grid_data[coord[0]][coord[1]] = {"name": CellName.NONE}
             elif action == Action.CHOP_WALL:
-                self.model.grid_data[coord[0]][coord[1]] = {"name": CellName.NONE}
+                self.model.walls.discard(_edge(self.pos, coord))
 
             self.action_points -= cost
 
@@ -90,4 +90,4 @@ class Player(Agent):
         return self._nearest(CellName.EXIT)
 
     def _path_to(self, target: Coord) -> list[Coord] | None:
-        return a_star(self.model.grid_data, self.pos, target)
+        return a_star(self.model, self.pos, target)
