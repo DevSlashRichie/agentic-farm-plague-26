@@ -99,8 +99,14 @@ def a_star(
 ) -> Optional[list[Coord]]:
     """Find shortest path on a 2D grid using A* search.
 
-    Movement is 4-directional with uniform step cost. Considers walls, closed doors,
-    and fire cells as impassable.
+    Movement is 4-directional. Walls and closed doors are passable with extra cost
+    (CHOP_WALL = 2 AP, OPEN_DOOR = 1 AP) — the agent follows the returned path and
+    chops/opens as it goes. Fire cells remain impassable.
+
+    Edge costs:
+        clear edge      = 1  (MOVE)
+        closed-door     = 2  (OPEN_DOOR + MOVE)
+        wall            = 3  (CHOP_WALL + MOVE)
 
     Args:
         model: GameModel holding grid_data, walls, doors.
@@ -108,7 +114,7 @@ def a_star(
         goal: (x, y) target coordinate.
 
     Returns:
-        List of (x, y) coordinates from start to goal, or None if no path exists.
+        List of (x, y) coordinates from start to goal, or None if fire-surrounded.
     """
     if start == goal:
         return [start]
@@ -120,13 +126,14 @@ def a_star(
         x, y = c
         return 0 <= x < width and 0 <= y < height
 
-    def passable(c: Coord) -> bool:
-        if not in_bounds(c):
-            return False
-        x, y = c
-        if model.grid_data[x][y]["name"] == CellName.FIRE:
-            return False
-        return True
+    def edge_cost(c: Coord, neighbor: Coord) -> int:
+        edge = _edge(c, neighbor)
+        cost = 1
+        if edge in model.doors and not model.doors[edge]:
+            cost += 1
+        if edge in model.walls:
+            cost += 2
+        return cost
 
     open_set: list[tuple[int, int, Coord]] = []
     counter = 0
@@ -153,11 +160,11 @@ def a_star(
         x, y = current
         for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
             neighbor = (nx, ny)
-            if not in_bounds(neighbor) or not passable(neighbor):
+            if not in_bounds(neighbor):
                 continue
-            if _edge_blocked(model, current, neighbor):
+            if model.grid_data[nx][ny]["name"] == CellName.FIRE:
                 continue
-            tentative_g = g_score[current] + 1
+            tentative_g = g_score[current] + edge_cost(current, neighbor)
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g

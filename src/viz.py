@@ -136,23 +136,23 @@ def _make_edge_artists(
     walls: set[tuple[Coord, Coord]],
     doors: dict[tuple[Coord, Coord], bool],
     ax,
-) -> tuple[list[Line2D], list[Line2D]]:
-    """Create wall and door Line2D artists, add them to ax, return them."""
-    wall_lines: list[Line2D] = []
+) -> tuple[dict[tuple[Coord, Coord], Line2D], dict[tuple[Coord, Coord], Line2D]]:
+    """Create wall and door Line2D artists, keyed by edge for stable identity tracking."""
+    wall_lines: dict[tuple[Coord, Coord], Line2D] = {}
     for edge in sorted(walls):
         xs, ys = _edge_segment(edge)
         line = Line2D(xs, ys, color=WALL_COLOR, linewidth=EDGE_LINEWIDTH,
                       solid_capstyle="butt", zorder=5)
         ax.add_line(line)
-        wall_lines.append(line)
+        wall_lines[edge] = line
 
-    door_lines: list[Line2D] = []
+    door_lines: dict[tuple[Coord, Coord], Line2D] = {}
     for edge in sorted(doors):
         xs, ys = _edge_segment(edge)
         line = Line2D(xs, ys, color=DOOR_CLOSED_COLOR, linewidth=EDGE_LINEWIDTH,
                       solid_capstyle="butt", zorder=5)
         ax.add_line(line)
-        door_lines.append(line)
+        door_lines[edge] = line
 
     return wall_lines, door_lines
 
@@ -160,29 +160,27 @@ def _make_edge_artists(
 def _refresh_edges(
     walls: set[tuple[Coord, Coord]],
     doors: dict[tuple[Coord, Coord], bool],
-    wall_lines: list[Line2D],
-    door_lines: list[Line2D],
+    wall_lines: dict[tuple[Coord, Coord], Line2D],
+    door_lines: dict[tuple[Coord, Coord], Line2D],
 ) -> None:
     """Sync artists with current walls/doors state (chopped walls hidden, open doors faded)."""
-    current_walls = sorted(walls)
-    for i, line in enumerate(wall_lines):
-        line.set_visible(i < len(current_walls))
+    for edge, line in wall_lines.items():
+        line.set_visible(edge in walls)
 
-    door_items = sorted(doors.items())
-    for i, line in enumerate(door_lines):
-        if i < len(door_items):
-            _, is_open = door_items[i]
-            line.set_visible(True)
-            if is_open:
-                line.set_color(DOOR_OPEN_COLOR)
-                line.set_linewidth(OPEN_LINEWIDTH)
-                line.set_alpha(0.6)
-            else:
-                line.set_color(DOOR_CLOSED_COLOR)
-                line.set_linewidth(EDGE_LINEWIDTH)
-                line.set_alpha(1.0)
-        else:
+    for edge, line in door_lines.items():
+        if edge not in doors:
             line.set_visible(False)
+            continue
+        is_open = doors[edge]
+        line.set_visible(True)
+        if is_open:
+            line.set_color(DOOR_OPEN_COLOR)
+            line.set_linewidth(OPEN_LINEWIDTH)
+            line.set_alpha(0.6)
+        else:
+            line.set_color(DOOR_CLOSED_COLOR)
+            line.set_linewidth(EDGE_LINEWIDTH)
+            line.set_alpha(1.0)
 
 
 def _legend_handles():
@@ -355,8 +353,8 @@ def animate_simulation(
         all_artists = [score_text, title_text]
         all_artists.extend(tiles[x][y] for x in range(width) for y in range(height))
         all_artists.extend(g for row in glyphs for g in row if g is not None)
-        all_artists.extend(wall_lines)
-        all_artists.extend(door_lines)
+        all_artists.extend(wall_lines.values())
+        all_artists.extend(door_lines.values())
         all_artists.extend(markers)
         return all_artists
 

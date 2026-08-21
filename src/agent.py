@@ -23,7 +23,7 @@ class Player(Agent):
         self.has_victim = False
 
     def step(self):
-        while self.action_points > 1:
+        while self.action_points > 0:
             x, y = self.pos
             cdata = self.model.grid_data[x][y]
 
@@ -48,7 +48,7 @@ class Player(Agent):
                     continue
 
             target = self._find_exit() if self.has_victim else self._nearest(CellName.UNKNOWN)
-            if target is None:
+            if target is None or target == self.pos:
                 break
 
             path = self._path_to(target)
