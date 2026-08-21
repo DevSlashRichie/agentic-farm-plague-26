@@ -25,8 +25,8 @@ class MapData(TypedDict):
     rows: int
     columns: int
     matrix: list[list[str]]
-    walls: list[list[list[int]]]
-    doors: list[list[list[int]]]
+    walls: list[tuple[Coord, Coord]]
+    doors: list[tuple[Coord, Coord]]
 
 
 Coord = tuple[int, int]

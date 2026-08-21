@@ -6,10 +6,11 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FuncAnimation
+from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Patch, Rectangle
 
 from src.maps import DEFAULT_MAP
-from src.domain import CellName
+from src.domain import CellName, Coord, MapData
 
 if TYPE_CHECKING:
     from matplotlib.animation import Animation
@@ -23,19 +24,40 @@ CELL_STYLE: dict[CellName, dict] = {
     CellName.NONE: {"color": "#ECECEC", "glyph": "\u00B7", "text_color": "#555555"},
     CellName.FIRE: {"color": "#E74C3C", "glyph": "F", "text_color": "white"},
     CellName.SMOKE: {"color": "#9AA0A6", "glyph": "S", "text_color": "white"},
-    CellName.DOOR: {"color": "#8B5A2B", "glyph": "D", "text_color": "white"},
-    CellName.WALL: {"color": "#2C2C2C", "glyph": "W", "text_color": "white"},
     CellName.EXIT: {"color": "#2ECC71", "glyph": "E", "text_color": "white"},
     CellName.VICTIM: {"color": "#F1C40F", "glyph": "V", "text_color": "black"},
     CellName.FAKE: {"color": "#FFE066", "glyph": "f", "text_color": "#7A6600"},
     CellName.UNKNOWN: {"color": "#4B4B4B", "glyph": "?", "text_color": "white"},
 }
 
+WALL_COLOR = "#2C2C2C"
+DOOR_CLOSED_COLOR = "#8B5A2B"
+DOOR_OPEN_COLOR = "#D4B896"
+EDGE_LINEWIDTH = 4
+OPEN_LINEWIDTH = 2
+
 AGENT_CMAP = plt.get_cmap("tab10")
 
 
 def agent_color(unique_id: int) -> str:
     return AGENT_CMAP(unique_id % 10)
+
+
+def _edge(a: Coord, b: Coord) -> tuple[Coord, Coord]:
+    return (a, b) if a < b else (b, a)
+
+
+def _edges_from_map(
+    map_data: MapData,
+) -> tuple[set[tuple[Coord, Coord]], dict[tuple[Coord, Coord], bool]]:
+    walls: set[tuple[Coord, Coord]] = set()
+    for a, b in map_data.get("walls", []):
+        walls.add(_edge(a, b))
+
+    doors: dict[tuple[Coord, Coord], bool] = {}
+    for a, b in map_data.get("doors", []):
+        doors[_edge(a, b)] = False
+    return walls, doors
 
 
 def _new_axes(width: int, height: int, figsize: tuple[float, float]):
@@ -61,7 +83,7 @@ def _new_axes(width: int, height: int, figsize: tuple[float, float]):
 
 
 def _cell_artists(width: int, height: int):
-    """Create one Rectangle + Text per cell, return as 2D arrays."""
+    """Create one Rectangle per cell, return as 2D arrays."""
     tiles = [[None] * height for _ in range(width)]
     glyphs = [[None] * height for _ in range(width)]
     for y in range(height):
@@ -100,6 +122,69 @@ def _apply_grid(tiles, glyphs, grid_data, width: int, height: int):
                 glyph.set_color(style["text_color"])
 
 
+def _edge_segment(edge: tuple[Coord, Coord]) -> tuple[list[float], list[float]]:
+    """Return ((x1, x2), (y1, y2)) for the Line2D plotting the shared boundary."""
+    (x1, y1), (x2, y2) = edge
+    if x1 == x2:
+        y = max(y1, y2)
+        return [min(x1, x2), max(x1, x2) + 1], [y, y]
+    x = max(x1, x2)
+    return [x, x], [min(y1, y2), max(y1, y2) + 1]
+
+
+def _make_edge_artists(
+    walls: set[tuple[Coord, Coord]],
+    doors: dict[tuple[Coord, Coord], bool],
+    ax,
+) -> tuple[list[Line2D], list[Line2D]]:
+    """Create wall and door Line2D artists, add them to ax, return them."""
+    wall_lines: list[Line2D] = []
+    for edge in sorted(walls):
+        xs, ys = _edge_segment(edge)
+        line = Line2D(xs, ys, color=WALL_COLOR, linewidth=EDGE_LINEWIDTH,
+                      solid_capstyle="butt", zorder=5)
+        ax.add_line(line)
+        wall_lines.append(line)
+
+    door_lines: list[Line2D] = []
+    for edge in sorted(doors):
+        xs, ys = _edge_segment(edge)
+        line = Line2D(xs, ys, color=DOOR_CLOSED_COLOR, linewidth=EDGE_LINEWIDTH,
+                      solid_capstyle="butt", zorder=5)
+        ax.add_line(line)
+        door_lines.append(line)
+
+    return wall_lines, door_lines
+
+
+def _refresh_edges(
+    walls: set[tuple[Coord, Coord]],
+    doors: dict[tuple[Coord, Coord], bool],
+    wall_lines: list[Line2D],
+    door_lines: list[Line2D],
+) -> None:
+    """Sync artists with current walls/doors state (chopped walls hidden, open doors faded)."""
+    current_walls = sorted(walls)
+    for i, line in enumerate(wall_lines):
+        line.set_visible(i < len(current_walls))
+
+    door_items = sorted(doors.items())
+    for i, line in enumerate(door_lines):
+        if i < len(door_items):
+            _, is_open = door_items[i]
+            line.set_visible(True)
+            if is_open:
+                line.set_color(DOOR_OPEN_COLOR)
+                line.set_linewidth(OPEN_LINEWIDTH)
+                line.set_alpha(0.6)
+            else:
+                line.set_color(DOOR_CLOSED_COLOR)
+                line.set_linewidth(EDGE_LINEWIDTH)
+                line.set_alpha(1.0)
+        else:
+            line.set_visible(False)
+
+
 def _legend_handles():
     handles = [
         Patch(facecolor=CELL_STYLE[name]["color"], edgecolor="#1A1A1A", label=name.value)
@@ -109,6 +194,9 @@ def _legend_handles():
     handles.append(
         Patch(facecolor=agent_color(0), edgecolor="white", linewidth=2.5, label="carrying victim")
     )
+    handles.append(Patch(facecolor=WALL_COLOR, edgecolor="#1A1A1A", label="wall"))
+    handles.append(Patch(facecolor=DOOR_CLOSED_COLOR, edgecolor="#1A1A1A", label="door (closed)"))
+    handles.append(Patch(facecolor=DOOR_OPEN_COLOR, edgecolor="#1A1A1A", label="door (open)"))
     return handles
 
 
@@ -120,7 +208,7 @@ def _set_agent_marker(marker, pos, carrying: bool, color: str):
 
 
 def render_map(
-    map_data: list[list[str]] | None = None,
+    map_data: MapData | None = None,
     *,
     show: bool = True,
     save_path: str | None = None,
@@ -129,21 +217,25 @@ def render_map(
     if map_data is None:
         map_data = DEFAULT_MAP
 
-    height = len(map_data)
-    width = len(map_data[0]) if height else 0
+    width = map_data["columns"]
+    height = map_data["rows"]
+    matrix = map_data["matrix"]
 
-    fig, ax, ax_legend = _new_axes(width, height, figsize=(max(6, width * 0.9 + 3), max(4, height * 0.9 + 1)))
-
-    # Build a synthetic grid_data matching DEFAULT_MAP strings (grid_data[x][y] layout, like GameModel).
     grid_data = [
-        [{"name": CellName(map_data[y][x])} for y in range(height)]
+        [{"name": CellName(matrix[y][x])} for y in range(height)]
         for x in range(width)
     ]
+
+    walls, doors = _edges_from_map(map_data)
+
+    fig, ax, ax_legend = _new_axes(width, height, figsize=(max(6, width * 0.9 + 3), max(4, height * 0.9 + 1)))
 
     tiles, glyphs = _cell_artists(width, height)
     for x in range(width):
         for y in range(height):
             ax.add_patch(tiles[x][y])
+
+    wall_lines, door_lines = _make_edge_artists(walls, doors, ax)
     _apply_grid(tiles, glyphs, grid_data, width, height)
 
     ax.set_title(
@@ -182,6 +274,8 @@ def animate_simulation(
     def capture() -> dict:
         return {
             "grid": copy.deepcopy(model.grid_data),
+            "walls": set(model.walls),
+            "doors": dict(model.doors),
             "agents": [(a.unique_id, tuple(a.pos), a.has_victim) for a in model.agents],
             "steps": model.steps,
             "rescued": model.victims_rescued,
@@ -205,6 +299,10 @@ def animate_simulation(
     for x in range(width):
         for y in range(height):
             ax.add_patch(tiles[x][y])
+
+    wall_lines, door_lines = _make_edge_artists(
+        snapshots[0]["walls"], snapshots[0]["doors"], ax
+    )
 
     max_agents = len(model.agents)
     markers: list[Circle] = []
@@ -238,6 +336,7 @@ def animate_simulation(
 
     def apply(snap: dict) -> list:
         _apply_grid(tiles, glyphs, snap["grid"], width, height)
+        _refresh_edges(snap["walls"], snap["doors"], wall_lines, door_lines)
         agents = snap["agents"]
         for i, marker in enumerate(markers):
             if i < len(agents):
@@ -256,6 +355,8 @@ def animate_simulation(
         all_artists = [score_text, title_text]
         all_artists.extend(tiles[x][y] for x in range(width) for y in range(height))
         all_artists.extend(g for row in glyphs for g in row if g is not None)
+        all_artists.extend(wall_lines)
+        all_artists.extend(door_lines)
         all_artists.extend(markers)
         return all_artists
 
@@ -268,7 +369,6 @@ def animate_simulation(
         return apply(snapshots[i])
 
     if not snapshots:
-        # Nothing to animate — just show the initial figure.
         if show:
             plt.show()
         return None

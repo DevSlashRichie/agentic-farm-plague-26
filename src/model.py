@@ -31,10 +31,6 @@ class GameModel(Model):
     def _edge(self, a: Coord, b: Coord) -> tuple[Coord, Coord]:
         return (a, b) if a < b else (b, a)
 
-    def _rc_to_xy(self, rc: list[int]) -> Coord:
-        r, c = rc
-        return (c - 1, r - 1)
-
     def _load_map(self, map_data: MapData):
         self.width = map_data["columns"]
         self.height = map_data["rows"]
@@ -54,13 +50,11 @@ class GameModel(Model):
                     self.grid_data[x][y]["hidden"] = CellName.VICTIM
 
         self.walls: set[tuple[Coord, Coord]] = set()
-        for pair in map_data["walls"]:
-            a, b = self._rc_to_xy(pair[0]), self._rc_to_xy(pair[1])
+        for a, b in map_data["walls"]:
             self.walls.add(self._edge(a, b))
 
         self.doors: dict[tuple[Coord, Coord], bool] = {}
-        for pair in map_data["doors"]:
-            a, b = self._rc_to_xy(pair[0]), self._rc_to_xy(pair[1])
+        for a, b in map_data["doors"]:
             self.doors[self._edge(a, b)] = False
 
     def _spawn_agents(self, count: int):
