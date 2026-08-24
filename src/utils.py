@@ -45,7 +45,7 @@ def calc_action_score(
     if not (0 <= x < model.width and 0 <= y < model.height):
         return -1
 
-    cell_name = model.grid_data[x][y]["name"]
+    cell_name = model.get_cell_name(x, y)
 
     if action == Action.MOVE:
         if manhattan(from_pos, to_pos) != 1 or cell_name == CellName.FIRE:
@@ -78,8 +78,8 @@ def valid_actions(
     carrying_victim = agent.has_victim
 
     if to_pos is None:
-        x, y = from_pos
-        targets = [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
+        fx, fy = from_pos
+        targets = [(fx + dx, fy + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
     else:
         targets = [to_pos]
 
@@ -109,7 +109,7 @@ def a_star(
         wall            = 3  (CHOP_WALL + MOVE)
 
     Args:
-        model: GameModel holding grid_data, walls, doors.
+        model: GameModel holding the grid, walls, doors.
         start: (x, y) starting coordinate.
         goal: (x, y) target coordinate.
 
@@ -122,10 +122,6 @@ def a_star(
     width = model.width
     height = model.height
 
-    def in_bounds(c: Coord) -> bool:
-        x, y = c
-        return 0 <= x < width and 0 <= y < height
-
     def edge_cost(c: Coord, neighbor: Coord) -> int:
         edge = _edge(c, neighbor)
         cost = 1
@@ -134,6 +130,14 @@ def a_star(
         if edge in model.walls:
             cost += 2
         return cost
+
+    def in_bounds(c: Coord) -> bool:
+        x, y = c
+        return 0 <= x < width and 0 <= y < height
+
+    def neighbors_of(c: Coord) -> list[Coord]:
+        x, y = c
+        return [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
 
     open_set: list[tuple[int, int, Coord]] = []
     counter = 0
@@ -157,12 +161,10 @@ def a_star(
             continue
         closed.add(current)
 
-        x, y = current
-        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
-            neighbor = (nx, ny)
+        for neighbor in neighbors_of(current):
             if not in_bounds(neighbor):
                 continue
-            if model.grid_data[nx][ny]["name"] == CellName.FIRE:
+            if model.get_cell_name(*neighbor) == CellName.FIRE:
                 continue
             tentative_g = g_score[current] + edge_cost(current, neighbor)
             if neighbor not in g_score or tentative_g < g_score[neighbor]:

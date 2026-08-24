@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
 from mesa import Agent
 
@@ -22,40 +22,84 @@ class Player(Agent):
         self.action_points = 4
         self.has_victim = False
 
-    def step(self):
+    def step(self) -> None:
+        """Drain the burst loop synchronously (legacy behavior, used by agents.do('step'))."""
+        for _ in self.step_generator():
+            pass
+
+    def step_generator(self) -> Iterator[None]:
+        """Burst loop that yields control after each AP-consuming action.
+
+        Used by ``GameModel.advance()`` to drive the simulation AP-by-AP so
+        matplotlib (or other consumers) can render one decision at a time.
+        A bare ``yield None`` is emitted immediately after ``emit_action``,
+        before the next decision iteration begins.
+        """
+        did_act = False
+        self.model.log(
+            "agent_turn",
+            agent=self,
+            ap=self.action_points,
+            pos=self.pos,
+            carrying=self.has_victim,
+        )
         while self.action_points > 0:
             x, y = self.pos
-            cdata = self.model.grid_data[x][y]
+            cdata = self.model.get_cell_name(x, y)
 
-            if cdata["name"] == CellName.UNKNOWN:
-                real = cdata["hidden"]
+            if cdata == CellName.UNKNOWN:
+                real = self.model.get_hidden(x, y)
                 if real == CellName.VICTIM:
-                    self.model.grid_data[x][y] = {"name": CellName.NONE}
+                    self.model.set_cell_name(x, y, CellName.NONE)
                     self.has_victim = True
                 else:
-                    self.model.grid_data[x][y] = {"name": real}
+                    self.model.set_cell_name(x, y, real)
+                self.model.log(
+                    "reveal",
+                    agent=self,
+                    cell=(x, y),
+                    hidden=real,
+                    picked_victim=(real == CellName.VICTIM),
+                )
+                yield
                 continue
 
             if not self.has_victim:
-                if cdata["name"] == CellName.VICTIM:
-                    self.model.grid_data[x][y] = {"name": CellName.NONE}
+                if cdata == CellName.VICTIM:
+                    self.model.set_cell_name(x, y, CellName.NONE)
                     self.has_victim = True
+                    self.model.log("pickup", agent=self, cell=(x, y), kind="victim")
+                    yield
                     continue
-                if cdata["name"] == CellName.FAKE:
-                    self.model.grid_data[x][y] = {"name": CellName.NONE}
+                if cdata == CellName.FAKE:
+                    self.model.set_cell_name(x, y, CellName.NONE)
+                    self.model.log("pickup", agent=self, cell=(x, y), kind="fake")
+                    yield
                     continue
 
             target = self._find_exit() if self.has_victim else self._nearest(CellName.UNKNOWN)
             if target is None or target == self.pos:
+                if target is None:
+                    self.model.log("idle", agent=self, reason="no_target")
                 break
 
             path = self._path_to(target)
             if not path or len(path) < 2:
+                self.model.log("idle", agent=self, reason="no_path", target=target)
                 break
+
+            self.model.log(
+                "path",
+                agent=self,
+                target=target,
+                length=len(path),
+                mode="carry" if self.has_victim else "explore",
+            )
 
             next_pos = path[1]
             actions = valid_actions(self.model, self, to_pos=next_pos)
             if not actions:
+                self.model.log("idle", agent=self, reason="blocked", target=target)
                 break
 
             option = actions[0]
@@ -68,11 +112,24 @@ class Player(Agent):
             elif action == Action.OPEN_DOOR:
                 self.model.doors[_edge(self.pos, coord)] = True
             elif action == Action.EXTINGUISH:
-                self.model.grid_data[coord[0]][coord[1]] = {"name": CellName.NONE}
+                self.model.set_cell_name(coord[0], coord[1], CellName.NONE)
             elif action == Action.CHOP_WALL:
                 self.model.walls.discard(_edge(self.pos, coord))
 
             self.action_points -= cost
+            self.model.emit_action(self, action, coord, cost)
+            self.model._try_deliver(self)
+            did_act = True
+            yield
+
+        self.model._try_deliver(self)
+        self.model.log(
+            "burst_done",
+            agent=self,
+            did_act=did_act,
+            ap_remaining=self.action_points,
+        )
+        self.reset_action_points()
 
     def reset_action_points(self):
         self.action_points = 4

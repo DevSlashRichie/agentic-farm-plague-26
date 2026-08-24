@@ -1,8 +1,17 @@
-from mesa import Model, DataCollector
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING
+
+from mesa import DataCollector, Model
+from mesa.discrete_space import OrthogonalVonNeumannGrid
 
 from src.agent import Player
-from src.maps import default_map
 from src.domain import CellName, Coord, MapData
+from src.maps import default_map
+
+if TYPE_CHECKING:
+    from src.domain import Action
 
 
 class GameModel(Model):
@@ -10,8 +19,6 @@ class GameModel(Model):
         super().__init__()
         if map_data is None:
             map_data = default_map()
-
-        self.steps = 0
 
         self.victims_killed = 0
         self.victims_rescued = 0
@@ -28,6 +35,26 @@ class GameModel(Model):
             },
         )
 
+        self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
+        self._log_subscribers: list[Callable[[str, dict], None]] = []
+        self._step_state: list[tuple[Player, Iterator[None]]] | None = None
+
+    @property
+    def _type_value(self) -> dict[CellName, int]:
+        return {
+            CellName.NONE: 0,
+            CellName.VICTIM: 1,
+            CellName.FAKE: 2,
+            CellName.FIRE: 3,
+            CellName.SMOKE: 4,
+            CellName.EXIT: 5,
+            CellName.UNKNOWN: 6,
+        }
+
+    @property
+    def _reverse_type_value(self) -> dict[int, CellName]:
+        return {v: k for k, v in self._type_value.items()}
+
     def _edge(self, a: Coord, b: Coord) -> tuple[Coord, Coord]:
         return (a, b) if a < b else (b, a)
 
@@ -35,19 +62,31 @@ class GameModel(Model):
         self.width = map_data["columns"]
         self.height = map_data["rows"]
 
-        self.grid_data = [
-            [{"name": CellName.NONE} for _ in range(self.height)]
-            for __ in range(self.width)
-        ]
+        self.grid = OrthogonalVonNeumannGrid(
+            dimensions=(self.height, self.width),
+            torus=False,
+            random=self.random,
+        )
+        self.grid.create_property_layer(
+            "cell_type",
+            default_value=self._type_value[CellName.NONE],
+            dtype=int,
+        )
+        self.grid.create_property_layer(
+            "hidden_type",
+            default_value=self._type_value[CellName.NONE],
+            dtype=int,
+        )
 
-        for y, row in enumerate(map_data["matrix"]):
+        tv = self._type_value
+        matrix = map_data["matrix"]
+        for y, row in enumerate(matrix):
             for x, cell_name in enumerate(row):
-                self.grid_data[x][y] = {"name": CellName(cell_name)}
-
-        for x in range(self.width):
-            for y in range(self.height):
-                if self.grid_data[x][y]["name"] == CellName.UNKNOWN:
-                    self.grid_data[x][y]["hidden"] = CellName.VICTIM
+                cell = self.grid[(y, x)]
+                name = CellName(cell_name)
+                cell.cell_type = tv[name]
+                if name == CellName.UNKNOWN:
+                    cell.hidden_type = tv[CellName.VICTIM]
 
         self.walls: set[tuple[Coord, Coord]] = set()
         for a, b in map_data["walls"]:
@@ -65,34 +104,81 @@ class GameModel(Model):
             exit_cell = exits[i % len(exits)]
             Player(self, (exit_cell["x"], exit_cell["y"]))
 
+    def get_cell_name(self, x: int, y: int) -> CellName:
+        return self._reverse_type_value[self.grid[(y, x)].cell_type]
+
+    def set_cell_name(self, x: int, y: int, name: CellName) -> None:
+        self.grid[(y, x)].cell_type = self._type_value[name]
+
+    def get_hidden(self, x: int, y: int) -> CellName:
+        return self._reverse_type_value[self.grid[(y, x)].hidden_type]
+
+    def set_hidden(self, x: int, y: int, name: CellName) -> None:
+        self.grid[(y, x)].hidden_type = self._type_value[name]
+
     def _try_deliver(self, agent: Player) -> None:
         if not agent.has_victim:
             return
         x, y = agent.pos
-        if self.grid_data[x][y]["name"] != CellName.EXIT:
+        if self.get_cell_name(x, y) != CellName.EXIT:
             return
         agent.has_victim = False
         self.victims_rescued += 1
+        self.log(
+            "rescue",
+            agent=agent,
+            pos=(x, y),
+            total=self.victims_rescued,
+        )
+
+    def emit_action(self, agent: Player, action: Action, coord: Coord, cost: int) -> None:
+        """Fan out an action event to all subscribed callbacks.
+
+        Fired once per action-point-consuming decision inside ``Player.step``
+        (i.e. after each MOVE / OPEN_DOOR / EXTINGUISH / CHOP_WALL). Free
+        actions like revealing UNKNOWN or picking up a victim do not emit.
+        """
+        for cb in self._on_action:
+            cb(agent, action, coord, cost)
+        self.log("action", agent=agent, action=action, coord=coord, cost=cost)
+
+    def log(self, kind: str, **payload) -> None:
+        """Fan out a narrative event to log subscribers.
+
+        ``kind`` is a stable tag (e.g. ``"step_begin"``, ``"rescue"``).
+        Subscribers receive ``(kind, payload_dict)``.
+        Unknown kinds are forward-compatible (subscribers may ignore them).
+        """
+        for cb in self._log_subscribers:
+            cb(kind, payload)
 
     def _kill_victims_in_fire(self):
-        for x in range(self.width):
-            for y in range(self.height):
-                if self.grid_data[x][y]["name"] != CellName.VICTIM:
-                    continue
-                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < self.width and 0 <= ny < self.height:
-                        if self.grid_data[nx][ny]["name"] == CellName.FIRE:
-                            self.grid_data[x][y] = {"name": CellName.FIRE}
-                            self.victims_killed += 1
-                            break
+        tv = self._type_value
+        fire_v = tv[CellName.FIRE]
+        victim_v = tv[CellName.VICTIM]
+        for cell in self.grid.all_cells:
+            if cell.cell_type != victim_v:
+                continue
+            for neighbor in cell.connections.values():
+                if neighbor.cell_type == fire_v:
+                    cell.cell_type = fire_v
+                    self.victims_killed += 1
+                    row, col = cell.coordinate
+                    self.log(
+                        "kill",
+                        pos=(col, row),
+                        total=self.victims_killed,
+                    )
+                    break
 
     def get_cells_by_name(self, name: CellName | str):
+        if isinstance(name, str):
+            name = CellName(name)
+        target = self._type_value[name]
         return [
-            {"x": x, "y": y, **self.grid_data[x][y]}
-            for x in range(self.width)
-            for y in range(self.height)
-            if self.grid_data[x][y]["name"] == name
+            {"x": c.coordinate[1], "y": c.coordinate[0]}
+            for c in self.grid.all_cells
+            if c.cell_type == target
         ]
 
     def _is_end_condition_met(self):
@@ -105,18 +191,51 @@ class GameModel(Model):
         return None
 
     def step(self):
-        if not self.running:
-            return
+        """Run one full step synchronously by draining advance() to completion."""
+        while self.advance():
+            pass
 
-        for agent in self.agents:
-            agent.step()
-            self._try_deliver(agent)
-            agent.reset_action_points()
+    def advance(self) -> bool:
+        """Advance the simulation by one action point, across all agents.
+
+        Returns ``True`` if more actions remain in the current step
+        (``fire`` propagation, ``datacollector``, end-condition check not
+        yet executed). Returns ``False`` once the step is finalized.
+
+        Continuous calls drive the simulation AP-by-AP: agent 1 AP-N,
+        agent 2 AP-N, …, agent K AP-N, then agent 1 AP-(N+1), etc.
+        Each call yields control after firing ``emit_action``, ``_try_deliver``,
+        and any ``log()`` callbacks.
+        """
+        if not self.running:
+            return False
+
+        if self._step_state is None:
+            self.log("step_begin", step=self.steps, agents=len(self.agents))
+            self._step_state = [(a, a.step_generator()) for a in self.agents]
+
+        while self._step_state:
+            agent, gen = self._step_state[0]
+            try:
+                next(gen)
+                return True
+            except StopIteration:
+                self._step_state.pop(0)
+                continue
 
         self._kill_victims_in_fire()
         self.datacollector.collect(self)
-
         reason = self._is_end_condition_met()
+        self.log(
+            "step_end",
+            step=self.steps,
+            rescued=self.victims_rescued,
+            killed=self.victims_killed,
+            running=self.running,
+            end_reason=reason,
+        )
         if reason:
-            print(reason)
             self.running = False
+            print(reason)
+        self._step_state = None
+        return False

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+import os
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Patch, Rectangle
 
 from src.maps import DEFAULT_MAP
-from src.domain import CellName, Coord, MapData
+from src.domain import Action, CellName, Coord, MapData
 
 if TYPE_CHECKING:
     from matplotlib.animation import Animation
@@ -18,6 +18,68 @@ if TYPE_CHECKING:
 
     from src.agent import Player
     from src.model import GameModel
+
+
+_RESET = "\x1b[0m"
+_DIM = "\x1b[2m"
+_RED = "\x1b[31m"
+_YELLOW = "\x1b[33m"
+_MAGENTA = "\x1b[35m"
+_GREEN = "\x1b[32m"
+
+
+def _use_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    try:
+        return os.isatty(1)
+    except Exception:
+        return False
+
+
+_USE_COLOR = _use_color()
+
+
+def _c(code: str, text: str) -> str:
+    if not _USE_COLOR:
+        return text
+    return f"{code}{text}{_RESET}"
+
+
+_ACTION_COLOR = {
+    Action.MOVE: "",
+    Action.OPEN_DOOR: _YELLOW,
+    Action.EXTINGUISH: _RED,
+    Action.CHOP_WALL: _MAGENTA,
+}
+
+
+def quiet_log(kind: str, _payload: dict) -> None:
+    """One-line-per-event debug log: actions, reveals, rescues, kills.
+
+    Skips noisiest kinds (agent_turn, pickup, path, idle, burst_done).
+    """
+    if kind == "action":
+        agent = _payload["agent"]
+        a: Action = _payload["action"]
+        color = _ACTION_COLOR.get(a, "")
+        step_num = agent.model.steps
+        step_label = _c(_DIM, f"step {step_num}")
+        agent_label = f"#{agent.unique_id}@{tuple(agent.pos)}"
+        action_label = _c(color, a.value.upper())
+        print(
+            f"{step_label}  {agent_label}  "
+            f"{action_label} -> {_payload['coord']} -{_payload['cost']}AP"
+        )
+    elif kind == "reveal":
+        cell = _payload["cell"]
+        hidden = _payload["hidden"].value
+        picked = " (picked up!)" if _payload["picked_victim"] else ""
+        print(_c(_GREEN, f"  ↪ reveal {cell} → {hidden}{picked}"))
+    elif kind == "rescue":
+        print(_c(_GREEN, f"  ★ RESCUE @ {_payload['pos']} total={_payload['total']}"))
+    elif kind == "kill":
+        print(_c(_RED, f"  ☠ KILL @ {_payload['pos']} total={_payload['total']}"))
 
 
 CELL_STYLE: dict[CellName, dict] = {
@@ -264,27 +326,16 @@ def animate_simulation(
     show: bool = True,
     save_path: str | None = None,
 ) -> Animation:
-    """Pre-run the model, then play back frames in a live matplotlib window.
+    """Animate the simulation live: each matplotlib frame drives one AP.
 
-    Consumes the model: after this call, ``model.running`` is False and its
-    state reflects the final step.
+    Live mode (not pre-run): the matplotlib timer ticks at ``interval_ms`` and
+    each tick advances the model by one action point (``model.advance()`` call).
+    Log subscribers fire inline as the model advances, so terminal output and
+    matplotlib rendering move in lockstep one decision at a time. Once the
+    ``model.advance()`` chain finalizes the current step (and returns False),
+    the figure stays on the final state until the window is closed (or until
+    the Pillow writer exhausts the frame budget when ``save_path`` is set).
     """
-    def capture() -> dict:
-        return {
-            "grid": copy.deepcopy(model.grid_data),
-            "walls": set(model.walls),
-            "doors": dict(model.doors),
-            "agents": [(a.unique_id, tuple(a.pos), a.has_victim) for a in model.agents],
-            "steps": model.steps,
-            "rescued": model.victims_rescued,
-            "killed": model.victims_killed,
-        }
-
-    snapshots: list[dict] = [capture()]
-    while model.running:
-        model.step()
-        snapshots.append(capture())
-
     width = model.width
     height = model.height
 
@@ -298,9 +349,9 @@ def animate_simulation(
         for y in range(height):
             ax.add_patch(tiles[x][y])
 
-    wall_lines, door_lines = _make_edge_artists(
-        snapshots[0]["walls"], snapshots[0]["doors"], ax
-    )
+    initial_walls = set(model.walls)
+    initial_doors = dict(model.doors)
+    wall_lines, door_lines = _make_edge_artists(initial_walls, initial_doors, ax)
 
     max_agents = len(model.agents)
     markers: list[Circle] = []
@@ -320,7 +371,7 @@ def animate_simulation(
     )
 
     title_text = ax.set_title(
-        f"Flashpoint \u2014 step 0 / {len(snapshots) - 1}", fontsize=12, pad=10
+        f"Flashpoint \u2014 step 0 / {model.max_steps}", fontsize=12, pad=10
     )
 
     ax_legend.legend(
@@ -332,7 +383,22 @@ def animate_simulation(
         title_fontsize=11,
     )
 
-    def apply(snap: dict) -> list:
+    def capture() -> dict:
+        return {
+            "grid": [
+                [{"name": model.get_cell_name(x, y)} for y in range(height)]
+                for x in range(width)
+            ],
+            "walls": set(model.walls),
+            "doors": dict(model.doors),
+            "agents": [(a.unique_id, tuple(a.pos), a.has_victim) for a in model.agents],
+            "steps": model.steps,
+            "rescued": model.victims_rescued,
+            "killed": model.victims_killed,
+        }
+
+    def apply() -> list:
+        snap = capture()
         _apply_grid(tiles, glyphs, snap["grid"], width, height)
         _refresh_edges(snap["walls"], snap["doors"], wall_lines, door_lines)
         agents = snap["agents"]
@@ -348,7 +414,7 @@ def animate_simulation(
             f"\u00B7 killed {snap['killed']} \u00B7 active {len(agents)}"
         )
         title_text.set_text(
-            f"Flashpoint \u2014 step {snap['steps']} / {len(snapshots) - 1}"
+            f"Flashpoint \u2014 step {snap['steps']} / {model.max_steps}"
         )
         all_artists = [score_text, title_text]
         all_artists.extend(tiles[x][y] for x in range(width) for y in range(height))
@@ -358,33 +424,39 @@ def animate_simulation(
         all_artists.extend(markers)
         return all_artists
 
-    def _init():
-        if not snapshots:
-            return [score_text, title_text]
-        return apply(snapshots[0])
+    def _init() -> list:
+        return apply()
 
-    def _update(i):
-        return apply(snapshots[i])
+    def _update(_i) -> list:
+        if model.running:
+            model.advance()
+        return apply()
 
-    if not snapshots:
-        if show:
-            plt.show()
-        return None
-
-    anim = FuncAnimation(
-        fig,
-        _update,
-        init_func=_init,
-        frames=len(snapshots),
-        interval=interval_ms,
-        repeat=False,
-        blit=False,
-    )
+    model._log_subscribers.append(quiet_log)
 
     if save_path:
-        anim.save(save_path, writer="pillow")
-    if show:
-        plt.show()
+        frame_budget = max(200, model.max_steps * model.steps * 6 + 20)
+    else:
+        frame_budget = None
+
+    try:
+        anim = FuncAnimation(
+            fig,
+            _update,
+            init_func=_init,
+            interval=interval_ms,
+            repeat=False,
+            blit=False,
+            cache_frame_data=False,
+            frames=frame_budget,
+        )
+        if save_path:
+            anim.save(save_path, writer="pillow")
+        if show:
+            plt.show()
+    finally:
+        model._log_subscribers.remove(quiet_log)
+
     return anim
 
 
