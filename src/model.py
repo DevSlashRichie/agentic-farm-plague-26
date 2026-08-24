@@ -15,8 +15,14 @@ if TYPE_CHECKING:
 
 
 class GameModel(Model):
-    def __init__(self, agents=6, max_steps=50, map_data: MapData | None = None):
-        super().__init__()
+    def __init__(
+        self,
+        agents=6,
+        max_steps=50,
+        map_data: MapData | None = None,
+        seed: float | int | None = None,
+    ):
+        super().__init__(seed=seed)
         if map_data is None:
             map_data = default_map()
 
@@ -131,6 +137,27 @@ class GameModel(Model):
             pos=(x, y),
             total=self.victims_rescued,
         )
+        self._spawn_unknown_pair()
+
+    def _spawn_unknown_pair(self) -> None:
+        """Spawn 2 new UNKNOWN cells (one VICTIM, one FAKE) on random NONE cells.
+
+        Called after every successful rescue. If fewer than 2 NONE cells are
+        available, this is a silent no-op (gameplay continues with fewer
+        threats). Spawn happens during the rescue step; other agents with AP
+        remaining may see and react to the new UNKNOWNs in the same step.
+        """
+        candidates = self.get_cells_by_name(CellName.NONE)
+        if len(candidates) < 2:
+            return
+        sample = self.random.sample(candidates, 2)
+        hidden_kinds = [CellName.VICTIM, CellName.FAKE]
+        self.random.shuffle(hidden_kinds)
+        for cell_data, kind in zip(sample, hidden_kinds):
+            x, y = cell_data["x"], cell_data["y"]
+            self.set_cell_name(x, y, CellName.UNKNOWN)
+            self.set_hidden(x, y, kind)
+            self.log("spawn", cell=(x, y), hidden_kind=kind.value)
 
     def emit_action(self, agent: Player, action: Action, coord: Coord, cost: int) -> None:
         """Fan out an action event to all subscribed callbacks.
@@ -185,8 +212,8 @@ class GameModel(Model):
     def _is_end_condition_met(self):
         if self.victims_rescued >= 7:
             return "7 victims rescued"
-        if self.victims_killed >= 1:
-            return "victim killed by fire"
+            #if self.victims_killed >= 1:
+            #    return "victim killed by fire"
         if self.steps >= self.max_steps:
             return "max steps reached"
         return None

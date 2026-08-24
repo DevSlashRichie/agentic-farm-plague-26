@@ -132,15 +132,30 @@ def test_log_emitted_inside_burst_loop():
 
 
 def test_idle_logged_when_no_target():
-    """Agent on a NONE cell with no nearby UNKNOWN and no victim -> idle( no_target )."""
+    """Agent on a NONE cell with no UNKNOWNs anywhere -> idle( no_target ).
+
+    Uses a minimal 2x2 map (no UNKNOWNs, no EXITs) so the agent has no target
+    to seek and must idle. Spawn-on-rescue doesn't apply because no rescue
+    can happen (no EXITs).
+    """
     seen: list[dict] = []
 
     def collect(kind: str, payload: dict) -> None:
         if kind == "idle":
             seen.append(payload)
 
-    model = GameModel()
-    player = Player(model, (4, 4))  # default_map[4][4] = "none"
+    minimal_map = {
+        "rows": 2,
+        "columns": 2,
+        "matrix": [
+            ["none", "none"],
+            ["none", "none"],
+        ],
+        "walls": [],
+        "doors": [],
+    }
+    model = GameModel(agents=0, map_data=minimal_map)
+    player = Player(model, (0, 0))
     assert not player.has_victim
 
     model._log_subscribers.append(collect)

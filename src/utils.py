@@ -164,9 +164,10 @@ def a_star(
         for neighbor in neighbors_of(current):
             if not in_bounds(neighbor):
                 continue
-            if model.get_cell_name(*neighbor) == CellName.FIRE:
-                continue
-            tentative_g = g_score[current] + edge_cost(current, neighbor)
+            # Fire is passable with extra cost (extinguish + move = 2 AP).
+            # Walls/closed doors use the same pattern via edge_cost().
+            fire_penalty = 1 if model.get_cell_name(*neighbor) == CellName.FIRE else 0
+            tentative_g = g_score[current] + edge_cost(current, neighbor) + fire_penalty
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g

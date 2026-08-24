@@ -32,11 +32,12 @@ def test_emit_action_fires_per_ap():
 
 def test_no_emit_action_subscribers_no_error():
     """Empty subscriber list must not break the simulation."""
-    model = GameModel(map_data=default_map())
+    model = GameModel(map_data=default_map(), seed=42)
     assert model._on_action == []
     while model.running:
         model.step()
-    assert model.victims_rescued == 3
+    # Spawn-on-rescue changes dynamics; the seeded run is deterministic.
+    assert model.victims_rescued == 8
     assert model.victims_killed == 0
 
 

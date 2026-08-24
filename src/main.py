@@ -116,6 +116,10 @@ def _f_kill(p: dict) -> str:
     return _c(_BOLD + _RED, f"  ☠ KILL @ {p['pos']} (total={p['total']})")
 
 
+def _f_spawn(p: dict) -> str:
+    return _c(_CYAN, f"  ◇ spawn UNKNOWN @ {p['cell']} hides {p['hidden_kind']}")
+
+
 FORMATTERS: dict[str, Callable[[dict], str]] = {
     "step_begin": _f_step_begin,
     "step_end": _f_step_end,
@@ -129,6 +133,7 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "burst_done": _f_burst_done,
     "rescue": _f_rescue,
     "kill": _f_kill,
+    "spawn": _f_spawn,
 }
 
 

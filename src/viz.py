@@ -25,6 +25,7 @@ _DIM = "\x1b[2m"
 _RED = "\x1b[31m"
 _YELLOW = "\x1b[33m"
 _MAGENTA = "\x1b[35m"
+_CYAN = "\x1b[36m"
 _GREEN = "\x1b[32m"
 
 
@@ -88,6 +89,8 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_GREEN, f"  ★ RESCUE @ {_payload['pos']} total={_payload['total']}"))
     elif kind == "kill":
         print(_c(_RED, f"  ☠ KILL @ {_payload['pos']} total={_payload['total']}"))
+    elif kind == "spawn":
+        print(_c(_CYAN, f"  ◇ spawn {_payload['cell']} hides {_payload['hidden_kind']}"))
 
 
 CELL_STYLE: dict[CellName, dict] = {
