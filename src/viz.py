@@ -55,9 +55,9 @@ _ACTION_COLOR = {
 
 
 def quiet_log(kind: str, _payload: dict) -> None:
-    """One-line-per-event debug log: actions, reveals, rescues, kills.
+    """One-line-per-event debug log: actions, reveals, pickups, rescues, kills.
 
-    Skips noisiest kinds (agent_turn, pickup, path, idle, burst_done).
+    Skips noisiest kinds (agent_turn, path, idle, burst_done).
     """
     if kind == "action":
         agent = _payload["agent"]
@@ -76,6 +76,14 @@ def quiet_log(kind: str, _payload: dict) -> None:
         hidden = _payload["hidden"].value
         picked = " (picked up!)" if _payload["picked_victim"] else ""
         print(_c(_GREEN, f"  ↪ reveal {cell} → {hidden}{picked}"))
+    elif kind == "pickup":
+        agent = _payload["agent"]
+        cell = _payload["cell"]
+        cell_kind = _payload["cell_kind"]
+        step_num = agent.model.steps
+        step_label = _c(_DIM, f"step {step_num}")
+        agent_label = f"#{agent.unique_id}@{tuple(agent.pos)}"
+        print(_c(_GREEN, f"{step_label}  {agent_label}  picked up {cell_kind} at {cell}"))
     elif kind == "rescue":
         print(_c(_GREEN, f"  ★ RESCUE @ {_payload['pos']} total={_payload['total']}"))
     elif kind == "kill":
