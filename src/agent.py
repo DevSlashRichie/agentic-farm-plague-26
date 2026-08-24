@@ -32,7 +32,6 @@ class Player(Agent):
                 if real == CellName.VICTIM:
                     self.model.grid_data[x][y] = {"name": CellName.NONE}
                     self.has_victim = True
-                    self.model.victims_rescued += 1
                 else:
                     self.model.grid_data[x][y] = {"name": real}
                 continue
@@ -41,7 +40,6 @@ class Player(Agent):
                 if cdata["name"] == CellName.VICTIM:
                     self.model.grid_data[x][y] = {"name": CellName.NONE}
                     self.has_victim = True
-                    self.model.victims_rescued += 1
                     continue
                 if cdata["name"] == CellName.FAKE:
                     self.model.grid_data[x][y] = {"name": CellName.NONE}

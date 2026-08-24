@@ -65,6 +65,15 @@ class GameModel(Model):
             exit_cell = exits[i % len(exits)]
             Player(self, (exit_cell["x"], exit_cell["y"]))
 
+    def _try_deliver(self, agent: Player) -> None:
+        if not agent.has_victim:
+            return
+        x, y = agent.pos
+        if self.grid_data[x][y]["name"] != CellName.EXIT:
+            return
+        agent.has_victim = False
+        self.victims_rescued += 1
+
     def _kill_victims_in_fire(self):
         for x in range(self.width):
             for y in range(self.height):
@@ -101,6 +110,7 @@ class GameModel(Model):
 
         for agent in self.agents:
             agent.step()
+            self._try_deliver(agent)
             agent.reset_action_points()
 
         self._kill_victims_in_fire()
