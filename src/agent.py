@@ -28,12 +28,22 @@ class Player(Agent):
             pass
 
     def step_generator(self) -> Iterator[None]:
-        """Burst loop that yields control after each AP-consuming action.
+        """Burst loop that yields control after each AP-consuming action and after
+        every discovery (UNKNOWN reveal / VICTIM pickup / FAKE pickup).
 
-        Used by ``GameModel.advance()`` to drive the simulation AP-by-AP so
-        matplotlib (or other consumers) can render one decision at a time.
-        A bare ``yield None`` is emitted immediately after ``emit_action``,
-        before the next decision iteration begins.
+        Discovery is checked at TWO sites so that an agent moving onto an
+        UNKNOWN (or VICTIM/FAKE) cell on its LAST action point still gets a
+        frame for the discovery:
+
+          1. **Spawn time**: ``yield from self._discover_once()`` once before
+             any actions fire. Handles agents placed on UNKNOWN/VICTIM/FAKE
+             cells at startup.
+
+          2. **Post-action**: after each ``emit_action`` we yield, then
+             ``yield from self._discover_once()``. This catches the
+             MOVE-onto-UNKNOWN-on-last-AP case (the loop guard
+             ``while self.action_points > 0`` would otherwise exit before any
+             top-of-iter discovery could run).
         """
         did_act = False
         self.model.log(
@@ -43,45 +53,42 @@ class Player(Agent):
             pos=self.pos,
             carrying=self.has_victim,
         )
+
+        # Spawn-time discovery: agent starts on UNKNOWN / VICTIM / FAKE.
+        yield from self._discover_once()
+
         while self.action_points > 0:
+            # Top-of-iter discovery: catch the case where the agent is standing
+            # on a VICTIM/FAKE that was revealed previously and not yet picked
+            # up. Without this, target == self.pos would short-circuit the
+            # loop and leave the VICTIM stranded (fire can then kill it).
+            yield from self._discover_once()
+
             x, y = self.pos
             cdata = self.model.get_cell_name(x, y)
 
-            if cdata == CellName.UNKNOWN:
-                real = self.model.get_hidden(x, y)
-                if real == CellName.VICTIM:
-                    self.model.set_cell_name(x, y, CellName.NONE)
-                    self.has_victim = True
+            if self.has_victim:
+                target = self._find_exit()
+            else:
+                nearest_victim = self._nearest(CellName.VICTIM)
+                nearest_unknown = self._nearest(CellName.UNKNOWN)
+                if nearest_victim is not None and (
+                    nearest_unknown is None
+                    or manhattan(self.pos, nearest_victim)
+                    < manhattan(self.pos, nearest_unknown)
+                ):
+                    target = nearest_victim
                 else:
-                    self.model.set_cell_name(x, y, real)
-                self.model.log(
-                    "reveal",
-                    agent=self,
-                    cell=(x, y),
-                    hidden=real,
-                    picked_victim=(real == CellName.VICTIM),
-                )
-                yield
-                continue
-
-            if not self.has_victim:
-                if cdata == CellName.VICTIM:
-                    self.model.set_cell_name(x, y, CellName.NONE)
-                    self.has_victim = True
-                    self.model.log("pickup", agent=self, cell=(x, y), kind="victim")
-                    yield
-                    continue
-                if cdata == CellName.FAKE:
-                    self.model.set_cell_name(x, y, CellName.NONE)
-                    self.model.log("pickup", agent=self, cell=(x, y), kind="fake")
-                    yield
-                    continue
-
-            target = self._find_exit() if self.has_victim else self._nearest(CellName.UNKNOWN)
-            if target is None or target == self.pos:
-                if target is None:
-                    self.model.log("idle", agent=self, reason="no_target")
+                    target = nearest_unknown
+            if target is None:
+                self.model.log("idle", agent=self, reason="no_target")
                 break
+            if target == self.pos:
+                # Already at the target cell. The top-of-iter discovery
+                # above may have picked up a VICTIM here; if so, fall through
+                # so the next iteration computes a new target (nearest EXIT).
+                if self.has_victim or cdata not in {CellName.UNKNOWN, CellName.VICTIM, CellName.FAKE}:
+                    break
 
             path = self._path_to(target)
             if not path or len(path) < 2:
@@ -122,6 +129,9 @@ class Player(Agent):
             did_act = True
             yield
 
+            # Post-action discovery: catches MOVE-onto-UNKNOWN-on-last-AP.
+            yield from self._discover_once()
+
         self.model._try_deliver(self)
         self.model.log(
             "burst_done",
@@ -130,6 +140,42 @@ class Player(Agent):
             ap_remaining=self.action_points,
         )
         self.reset_action_points()
+
+    def _discover_once(self) -> Iterator[None]:
+        """Discover current cell; yield exactly once if anything was discovered.
+
+        Sub-iterator pattern used with ``yield from`` in :meth:`step_generator`.
+        Yields once when a discovery happens (UNKNOWN reveal, VICTIM pickup,
+        or FAKE pickup) and returns nothing otherwise.
+
+        ``UNKNOWN`` reveals are pure exposure: the cell adopts its hidden
+        value (VICTIM, FAKE, …) but ``self.has_victim`` stays False. Other
+        agents can plan against the now-visible VICTIM; the revealing
+        agent decides later whether to pick it up via the VICTIM pickup
+        branch on a subsequent iteration.
+        """
+        x, y = self.pos
+        cdata = self.model.get_cell_name(x, y)
+        if cdata == CellName.UNKNOWN:
+            real = self.model.get_hidden(x, y)
+            self.model.set_cell_name(x, y, real)
+            self.model.log(
+                "reveal",
+                agent=self,
+                cell=(x, y),
+                hidden=real,
+                picked_victim=False,
+            )
+            yield
+        elif not self.has_victim and cdata == CellName.VICTIM:
+            self.model.set_cell_name(x, y, CellName.NONE)
+            self.has_victim = True
+            self.model.log("pickup", agent=self, cell=(x, y), cell_kind="victim")
+            yield
+        elif cdata == CellName.FAKE:
+            self.model.set_cell_name(x, y, CellName.NONE)
+            self.model.log("pickup", agent=self, cell=(x, y), cell_kind="fake")
+            yield
 
     def reset_action_points(self):
         self.action_points = 4

@@ -80,7 +80,7 @@ def _f_reveal(p: dict) -> str:
 
 
 def _f_pickup(p: dict) -> str:
-    return f"    ↳ picked up {p['kind']} at {p['cell']}"
+    return f"    ↳ picked up {p['cell_kind']} at {p['cell']}"
 
 
 def _f_idle(p: dict) -> str:

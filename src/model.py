@@ -38,6 +38,7 @@ class GameModel(Model):
         self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
         self._log_subscribers: list[Callable[[str, dict], None]] = []
         self._step_state: list[tuple[Player, Iterator[None]]] | None = None
+        self._in_user_step: bool = False
 
     @property
     def _type_value(self) -> dict[CellName, int]:
@@ -192,8 +193,12 @@ class GameModel(Model):
 
     def step(self):
         """Run one full step synchronously by draining advance() to completion."""
-        while self.advance():
-            pass
+        self._in_user_step = True
+        try:
+            while self.advance():
+                pass
+        finally:
+            self._in_user_step = False
 
     def advance(self) -> bool:
         """Advance the simulation by one action point, across all agents.
@@ -206,11 +211,20 @@ class GameModel(Model):
         agent 2 AP-N, …, agent K AP-N, then agent 1 AP-(N+1), etc.
         Each call yields control after firing ``emit_action``, ``_try_deliver``,
         and any ``log()`` callbacks.
+
+        Step counting: ``_do_step`` in Mesa's default EventGenerator already
+        increments ``self.steps`` before invoking ``_user_step`` (our ``step``
+        method) — so when called via ``model.step()``, ``advance()`` does NOT
+        increment again (``self._in_user_step=True`` guard). When called
+        directly (matplotlib live animation, tests driving via ``advance``),
+        ``advance()`` increments ``self.steps`` itself.
         """
         if not self.running:
             return False
 
         if self._step_state is None:
+            if not getattr(self, "_in_user_step", False):
+                self.steps += 1
             self.log("step_begin", step=self.steps, agents=len(self.agents))
             self._step_state = [(a, a.step_generator()) for a in self.agents]
 
