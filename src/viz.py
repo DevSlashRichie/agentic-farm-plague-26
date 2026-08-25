@@ -78,13 +78,9 @@ def quiet_log(kind: str, _payload: dict) -> None:
         picked = " (picked up!)" if _payload["picked_victim"] else ""
         print(_c(_GREEN, f"  ↪ reveal {cell} → {hidden}{picked}"))
     elif kind == "pickup":
-        agent = _payload["agent"]
         cell = _payload["cell"]
         cell_kind = _payload["cell_kind"]
-        step_num = agent.model.steps
-        step_label = _c(_DIM, f"step {step_num}")
-        agent_label = f"#{agent.unique_id}@{tuple(agent.pos)}"
-        print(_c(_GREEN, f"{step_label}  {agent_label}  picked up {cell_kind} at {cell}"))
+        print(_c(_GREEN, f"    ↳ picked up {cell_kind} at {cell}"))
     elif kind == "rescue":
         print(_c(_GREEN, f"  ★ RESCUE @ {_payload['pos']} total={_payload['total']}"))
     elif kind == "kill":
