@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Iterator
 from mesa import Agent
 
 from src.domain import Action, CellName, Coord
-from src.utils import _edge, dijkstra, manhattan, valid_actions
+from src.utils import _action_cost, _edge, dijkstra, manhattan
 
 if TYPE_CHECKING:
     from src.model import GameModel
@@ -91,7 +91,7 @@ class Player(Agent):
                     break
 
             path = self._path_to(target)
-            if not path or len(path) < 2:
+            if not path:
                 self.model.log("idle", agent=self, reason="no_path", target=target)
                 break
 
@@ -103,28 +103,20 @@ class Player(Agent):
                 mode="carry" if self.has_victim else "explore",
             )
 
-            next_pos = path[1]
-            actions = valid_actions(self.model, self, to_pos=next_pos)
-            if not actions:
-                self.model.log("idle", agent=self, reason="blocked", target=target)
-                break
-
-            option = actions[0]
-            action = option["action"]
-            coord = option["coord"]
-            cost = option["cost"]
+            action_target, action = path[0]
+            cost = _action_cost(action, self.has_victim)
 
             if action == Action.MOVE:
-                self.pos = coord
+                self.pos = action_target
             elif action == Action.OPEN_DOOR:
-                self.model.doors[_edge(self.pos, coord)] = True
+                self.model.doors[_edge(self.pos, action_target)] = True
             elif action == Action.EXTINGUISH:
-                self.model.set_cell_name(coord[0], coord[1], CellName.NONE)
+                self.model.set_cell_name(action_target[0], action_target[1], CellName.NONE)
             elif action == Action.CHOP_WALL:
-                self.model.walls.discard(_edge(self.pos, coord))
+                self.model.walls.discard(_edge(self.pos, action_target))
 
             self.action_points -= cost
-            self.model.emit_action(self, action, coord, cost)
+            self.model.emit_action(self, action, action_target, cost)
             self.model._try_deliver(self)
             did_act = True
             yield
@@ -190,5 +182,10 @@ class Player(Agent):
     def _find_exit(self) -> Coord | None:
         return self._nearest(CellName.EXIT)
 
-    def _path_to(self, target: Coord) -> list[Coord] | None:
-        return dijkstra(self.model, self.pos, target)
+    def _path_to(self, target: Coord) -> list[tuple[Coord, Action]] | None:
+        return dijkstra(
+            self.model,
+            self.pos,
+            target,
+            carrying=self.has_victim,
+        )

@@ -64,7 +64,7 @@ def calc_action_score(
         return -1
 
     if action == Action.CHOP_WALL:
-        return 2 if _edge(from_pos, to_pos) in model.walls else -1
+        return 4 if _edge(from_pos, to_pos) in model.walls else -1
 
     return -1
 
@@ -92,48 +92,66 @@ def valid_actions(
     return results
 
 
+def _action_cost(action: Action, carrying: bool) -> int:
+    """AP cost of a single action. MOVE costs 2 if carrying a victim."""
+    if action == Action.MOVE:
+        return 2 if carrying else 1
+    return {
+        Action.OPEN_DOOR: 1,
+        Action.CHOP_WALL: 4,
+        Action.EXTINGUISH: 2,
+    }.get(action, 1)
+
+
+def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -> list[Action]:
+    """Action sequence to traverse from cell ``c`` to adjacent cell ``neighbor``.
+
+    Order: edge-prep (CHOP_WALL or OPEN_DOOR if needed) → MOVE → EXTINGUISH
+    if the destination cell is on fire.
+    """
+    actions: list[Action] = []
+    edge = _edge(c, neighbor)
+    if edge in model.walls:
+        actions.append(Action.CHOP_WALL)
+    elif edge in model.doors and not model.doors[edge]:
+        actions.append(Action.OPEN_DOOR)
+    actions.append(Action.MOVE)
+    if model.get_cell_name(*neighbor) == CellName.FIRE:
+        actions.append(Action.EXTINGUISH)
+    return actions
+
+
 def dijkstra(
     model: GameModel,
     start: Coord,
     goal: Coord,
-) -> Optional[list[Coord]]:
-    """Find shortest path on a 2D grid using Dijkstra's algorithm.
+    *,
+    carrying: bool = False,
+) -> Optional[list[tuple[Coord, Action]]]:
+    """Find shortest action sequence from ``start`` to ``goal``.
 
-    Movement is 4-directional. Walls and closed doors are passable with extra cost
-    (CHOP_WALL = 2 AP, OPEN_DOOR = 1 AP) — the agent follows the returned path and
-    chops/opens as it goes. Fire cells are passable with +1 cost (EXTINGUISH + MOVE).
+    Returns a list of ``(target_coord, action)`` tuples — one per agent action.
+    ``target_coord`` is the cell the action affects: the neighbor for
+    ``OPEN_DOOR`` / ``CHOP_WALL`` / ``EXTINGUISH`` (the agent stays at
+    ``c``), or the destination for ``MOVE``. The agent's position updates to
+    ``target_coord`` after ``MOVE`` and is unchanged for the others.
 
-    Edge costs:
-        clear edge      = 1  (MOVE)
-        closed-door     = 2  (OPEN_DOOR + MOVE)
-        wall            = 3  (CHOP_WALL + MOVE)
-        fire            = 2  (EXTINGUISH + MOVE)
+    Empty list means ``start == goal``. ``None`` means unreachable.
 
     Args:
         model: GameModel holding the grid, walls, doors.
         start: (x, y) starting coordinate.
         goal: (x, y) target coordinate.
+        carrying: whether the agent is carrying a victim (MOVE = 2 AP).
 
     Returns:
-        List of (x, y) coordinates from start to goal, or None if unreachable.
+        List of (target_coord, action) tuples, or None.
     """
     if start == goal:
-        return [start]
+        return []
 
     width = model.width
     height = model.height
-
-    def edge_cost(current_g: int, c: Coord, neighbor: Coord) -> int:
-        edge = _edge(c, neighbor)
-        cost = 1
-        if edge in model.doors and not model.doors[edge]:
-            cost += 1
-        if edge in model.walls:
-            cost += 2
-        # Fire is passable with extra cost (extinguish + move = 2 AP).
-        if model.get_cell_name(*neighbor) == CellName.FIRE:
-            cost += 1
-        return current_g + cost
 
     def in_bounds(c: Coord) -> bool:
         x, y = c
@@ -142,6 +160,9 @@ def dijkstra(
     def neighbors_of(c: Coord) -> list[Coord]:
         x, y = c
         return [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
+
+    def edge_cost_total(c: Coord, neighbor: Coord) -> int:
+        return sum(_action_cost(a, carrying) for a in _edge_actions(model, c, neighbor, carrying))
 
     counter = 0
     open_set: list[tuple[int, int, Coord]] = []
@@ -155,11 +176,21 @@ def dijkstra(
         _, _, current = heapq.heappop(open_set)
 
         if current == goal:
-            path = [current]
+            # Reconstruct position path.
+            pos_path = [current]
             while current in came_from:
                 current = came_from[current]
-                path.append(current)
-            return path[::-1]
+                pos_path.append(current)
+            pos_path.reverse()
+            # Expand each cell-to-cell transition into its action sequence.
+            # target = nbr for every action: the cell the action affects
+            # (destination for MOVE; neighbor for OPEN_DOOR/CHOP_WALL/EXTINGUISH).
+            action_seq: list[tuple[Coord, Action]] = []
+            for i in range(len(pos_path) - 1):
+                c, nbr = pos_path[i], pos_path[i + 1]
+                for action in _edge_actions(model, c, nbr, carrying):
+                    action_seq.append((nbr, action))
+            return action_seq
 
         if current in closed:
             continue
@@ -168,7 +199,7 @@ def dijkstra(
         for neighbor in neighbors_of(current):
             if not in_bounds(neighbor):
                 continue
-            tentative_g = edge_cost(g_score[current], current, neighbor)
+            tentative_g = g_score[current] + edge_cost_total(current, neighbor)
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g
