@@ -123,14 +123,17 @@ def dijkstra(
     width = model.width
     height = model.height
 
-    def edge_cost(c: Coord, neighbor: Coord) -> int:
+    def edge_cost(current_g: int, c: Coord, neighbor: Coord) -> int:
         edge = _edge(c, neighbor)
         cost = 1
         if edge in model.doors and not model.doors[edge]:
             cost += 1
         if edge in model.walls:
             cost += 2
-        return cost
+        # Fire is passable with extra cost (extinguish + move = 2 AP).
+        if model.get_cell_name(*neighbor) == CellName.FIRE:
+            cost += 1
+        return current_g + cost
 
     def in_bounds(c: Coord) -> bool:
         x, y = c
@@ -165,9 +168,7 @@ def dijkstra(
         for neighbor in neighbors_of(current):
             if not in_bounds(neighbor):
                 continue
-            # Fire is passable with extra cost (extinguish + move = 2 AP).
-            fire_penalty = 1 if model.get_cell_name(*neighbor) == CellName.FIRE else 0
-            tentative_g = g_score[current] + edge_cost(current, neighbor) + fire_penalty
+            tentative_g = edge_cost(g_score[current], current, neighbor)
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g
