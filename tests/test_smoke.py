@@ -21,13 +21,12 @@ def test_default_map_runs_to_completion():
 def test_default_match_predicted_baseline():
     """Regression: default_map + seed=42 produces deterministic rescued/killed/steps.
 
-    Spawn-on-rescue is enabled: every rescue adds 2 new UNKNOWNs. The win
-    condition ``rescued >= 7`` triggers end-of-game. With seed=42 the
-    run terminates after 4 steps with 8 rescues and 0 kills.
+    Spawn-on-rescue + per-step smoke spawn are both enabled. With seed=42
+    the run terminates via the win condition ``rescued >= 7``.
     """
     model = GameModel(map_data=default_map(), seed=42)
     _drain(model)
-    assert model.victims_rescued == 8, f"got {model.victims_rescued}"
+    assert model.victims_rescued == 7, f"got {model.victims_rescued}"
     assert model.victims_killed == 0, f"got {model.victims_killed}"
 
 

@@ -36,8 +36,8 @@ def test_no_emit_action_subscribers_no_error():
     assert model._on_action == []
     while model.running:
         model.step()
-    # Spawn-on-rescue changes dynamics; the seeded run is deterministic.
-    assert model.victims_rescued == 8
+    # Spawn-on-rescue + per-step smoke spawn: deterministic with seed=42.
+    assert model.victims_rescued == 7
     assert model.victims_killed == 0
 
 

@@ -199,6 +199,62 @@ class GameModel(Model):
                     )
                     break
 
+    def _smoke_spawn_step(self) -> None:
+        """Pick a random cell uniformly; apply one of three escalations.
+
+        - NONE / VICTIM / FAKE / EXIT / UNKNOWN → becomes SMOKE (overwrite)
+        - SMOKE                                   → becomes FIRE
+        - FIRE                                    → triggers explosion
+        """
+        x = self.random.randrange(self.width)
+        y = self.random.randrange(self.height)
+        cell = self.grid[(y, x)]
+        was = self._reverse_type_value[cell.cell_type]
+
+        if was == CellName.FIRE:
+            self.log(
+                "smoke_spawn",
+                cell=(x, y),
+                was="fire",
+                became="fire_explode",
+            )
+            self._explode_at(x, y)
+            return
+
+        became = CellName.FIRE if was == CellName.SMOKE else CellName.SMOKE
+        cell.cell_type = self._type_value[became]
+        self.log(
+            "smoke_spawn",
+            cell=(x, y),
+            was=was.value,
+            became=became.value,
+        )
+
+    def _explode_at(self, fx: int, fy: int) -> None:
+        """Spread fire along 4 cardinal rays until non-fire, wall, or map edge."""
+        from src.utils import _edge
+
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            prev = (fx, fy)
+            cx, cy = fx + dx, fy + dy
+            while 0 <= cx < self.width and 0 <= cy < self.height:
+                cur = (cx, cy)
+                if _edge(prev, cur) in self.walls:
+                    break
+                if self.get_cell_name(cx, cy) == CellName.FIRE:
+                    prev = cur
+                    cx += dx
+                    cy += dy
+                    continue
+                self.set_cell_name(cx, cy, CellName.FIRE)
+                self.log(
+                    "explode",
+                    cell=(cx, cy),
+                    origin=(fx, fy),
+                    direction=(dx, dy),
+                )
+                break
+
     def get_cells_by_name(self, name: CellName | str):
         if isinstance(name, str):
             name = CellName(name)
@@ -265,6 +321,7 @@ class GameModel(Model):
                 continue
 
         self._kill_victims_in_fire()
+        self._smoke_spawn_step()
         self.datacollector.collect(self)
         reason = self._is_end_condition_met()
         self.log(

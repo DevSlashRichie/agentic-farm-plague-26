@@ -91,6 +91,10 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_RED, f"  ☠ KILL @ {_payload['pos']} total={_payload['total']}"))
     elif kind == "spawn":
         print(_c(_CYAN, f"  ◇ spawn {_payload['cell']} hides {_payload['hidden_kind']}"))
+    elif kind == "smoke_spawn":
+        print(_c(_CYAN, f"  ~ smoke_spawn {_payload['was']}→{_payload['became']} @ {_payload['cell']}"))
+    elif kind == "explode":
+        print(_c(_RED, f"  💥 explode → fire @ {_payload['cell']} (origin {_payload['origin']})"))
 
 
 CELL_STYLE: dict[CellName, dict] = {

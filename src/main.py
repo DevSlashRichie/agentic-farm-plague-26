@@ -120,6 +120,14 @@ def _f_spawn(p: dict) -> str:
     return _c(_CYAN, f"  ◇ spawn UNKNOWN @ {p['cell']} hides {p['hidden_kind']}")
 
 
+def _f_smoke_spawn(p: dict) -> str:
+    return _c(_CYAN, f"  ~ smoke_spawn {p['was']}→{p['became']} @ {p['cell']}")
+
+
+def _f_explode(p: dict) -> str:
+    return _c(_BOLD + _RED, f"  💥 explode → fire @ {p['cell']} (origin {p['origin']})")
+
+
 FORMATTERS: dict[str, Callable[[dict], str]] = {
     "step_begin": _f_step_begin,
     "step_end": _f_step_end,
@@ -134,6 +142,8 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "rescue": _f_rescue,
     "kill": _f_kill,
     "spawn": _f_spawn,
+    "smoke_spawn": _f_smoke_spawn,
+    "explode": _f_explode,
 }
 
 
