@@ -106,8 +106,9 @@ def _action_cost(action: Action, carrying: bool) -> int:
 def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -> list[Action]:
     """Action sequence to traverse from cell ``c`` to adjacent cell ``neighbor``.
 
-    Order: edge-prep (CHOP_WALL or OPEN_DOOR if needed) → MOVE → EXTINGUISH
-    if the destination cell is on fire.
+    Order: edge-prep (CHOP_WALL or OPEN_DOOR if needed) → EXTINGUISH
+    if the destination cell is on fire → MOVE. The agent clears fire
+    *before* stepping into the cell.
     """
     actions: list[Action] = []
     edge = _edge(c, neighbor)
@@ -115,9 +116,9 @@ def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -
         actions.append(Action.CHOP_WALL)
     elif edge in model.doors and not model.doors[edge]:
         actions.append(Action.OPEN_DOOR)
-    actions.append(Action.MOVE)
     if model.get_cell_name(*neighbor) == CellName.FIRE:
         actions.append(Action.EXTINGUISH)
+    actions.append(Action.MOVE)
     return actions
 
 
