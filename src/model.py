@@ -137,24 +137,36 @@ class GameModel(Model):
             pos=(x, y),
             total=self.victims_rescued,
         )
-        self._spawn_unknown_pair()
+        self._spawn_unknowns_to_maintain_three()
 
-    def _spawn_unknown_pair(self) -> None:
-        """Spawn 2 new UNKNOWN cells (one VICTIM, one FAKE) on random NONE cells.
+    def _count_alive_victims(self) -> int:
+        """Count victims currently in play: revealed VICTIM cells plus agents carrying one."""
+        count = 0
+        for cell in self.grid.all_cells:
+            if self._reverse_type_value[cell.cell_type] == CellName.VICTIM:
+                count += 1
+        for agent in self.agents:
+            if agent.has_victim:
+                count += 1
+        return count
 
-        Called after every successful rescue. If fewer than 2 NONE cells are
-        available, this is a silent no-op (gameplay continues with fewer
-        threats). Spawn happens during the rescue step; other agents with AP
-        remaining may see and react to the new UNKNOWNs in the same step.
+    def _spawn_unknowns_to_maintain_three(self) -> None:
+        """Spawn UNKNOWN cells to bring alive-victim count toward 3 after a rescue.
+
+        Each spawn is independently 50/50 VICTIM or FAKE. Capped at the
+        number of available NONE cells.
         """
-        candidates = self.get_cells_by_name(CellName.NONE)
-        if len(candidates) < 2:
+        target = max(0, 3 - self._count_alive_victims())
+        if target == 0:
             return
-        sample = self.random.sample(candidates, 2)
-        hidden_kinds = [CellName.VICTIM, CellName.FAKE]
-        self.random.shuffle(hidden_kinds)
-        for cell_data, kind in zip(sample, hidden_kinds):
+        candidates = self.get_cells_by_name(CellName.NONE)
+        if not candidates:
+            return
+        n = min(target, len(candidates))
+        sample = self.random.sample(candidates, n)
+        for cell_data in sample:
             x, y = cell_data["x"], cell_data["y"]
+            kind = CellName.VICTIM if self.random.random() < 0.5 else CellName.FAKE
             self.set_cell_name(x, y, CellName.UNKNOWN)
             self.set_hidden(x, y, kind)
             self.log("spawn", cell=(x, y), hidden_kind=kind.value)

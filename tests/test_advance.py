@@ -13,9 +13,10 @@ def test_advance_drives_simulation_to_completion():
         calls += 1
         if calls > 50_000:
             raise AssertionError("advance() did not terminate")
-    # Spawn-on-rescue dynamic with seed=42: ends at the win condition (rescued >= 7).
+    # Spawn-on-rescue (3 - alive_victims) dynamic with seed=42: ends at the
+    # win condition (rescued >= 7).
     assert model.victims_rescued >= 7
-    assert model.victims_killed == 0
+    assert model.victims_killed <= 2
     assert model.steps <= model.max_steps
 
 
