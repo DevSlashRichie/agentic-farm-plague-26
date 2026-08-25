@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Iterator
 from mesa import Agent
 
 from src.domain import Action, CellName, Coord
-from src.utils import _edge, a_star, manhattan, valid_actions
+from src.utils import _edge, dijkstra, manhattan, valid_actions
 
 if TYPE_CHECKING:
     from src.model import GameModel
@@ -191,4 +191,4 @@ class Player(Agent):
         return self._nearest(CellName.EXIT)
 
     def _path_to(self, target: Coord) -> list[Coord] | None:
-        return a_star(self.model, self.pos, target)
+        return dijkstra(self.model, self.pos, target)

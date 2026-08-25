@@ -92,21 +92,22 @@ def valid_actions(
     return results
 
 
-def a_star(
+def dijkstra(
     model: GameModel,
     start: Coord,
     goal: Coord,
 ) -> Optional[list[Coord]]:
-    """Find shortest path on a 2D grid using A* search.
+    """Find shortest path on a 2D grid using Dijkstra's algorithm.
 
     Movement is 4-directional. Walls and closed doors are passable with extra cost
     (CHOP_WALL = 2 AP, OPEN_DOOR = 1 AP) — the agent follows the returned path and
-    chops/opens as it goes. Fire cells remain impassable.
+    chops/opens as it goes. Fire cells are passable with +1 cost (EXTINGUISH + MOVE).
 
     Edge costs:
         clear edge      = 1  (MOVE)
         closed-door     = 2  (OPEN_DOOR + MOVE)
         wall            = 3  (CHOP_WALL + MOVE)
+        fire            = 2  (EXTINGUISH + MOVE)
 
     Args:
         model: GameModel holding the grid, walls, doors.
@@ -114,7 +115,7 @@ def a_star(
         goal: (x, y) target coordinate.
 
     Returns:
-        List of (x, y) coordinates from start to goal, or None if fire-surrounded.
+        List of (x, y) coordinates from start to goal, or None if unreachable.
     """
     if start == goal:
         return [start]
@@ -139,9 +140,9 @@ def a_star(
         x, y = c
         return [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
 
-    open_set: list[tuple[int, int, Coord]] = []
     counter = 0
-    heapq.heappush(open_set, (manhattan(start, goal), counter, start))
+    open_set: list[tuple[int, int, Coord]] = []
+    heapq.heappush(open_set, (0, counter, start))
 
     g_score: dict[Coord, int] = {start: 0}
     came_from: dict[Coord, Coord] = {}
@@ -165,14 +166,12 @@ def a_star(
             if not in_bounds(neighbor):
                 continue
             # Fire is passable with extra cost (extinguish + move = 2 AP).
-            # Walls/closed doors use the same pattern via edge_cost().
             fire_penalty = 1 if model.get_cell_name(*neighbor) == CellName.FIRE else 0
             tentative_g = g_score[current] + edge_cost(current, neighbor) + fire_penalty
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g
-                f_score = tentative_g + manhattan(neighbor, goal)
                 counter += 1
-                heapq.heappush(open_set, (f_score, counter, neighbor))
+                heapq.heappush(open_set, (tentative_g, counter, neighbor))
 
     return None
