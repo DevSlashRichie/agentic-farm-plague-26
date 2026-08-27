@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
 
-from src.domain import Action
+from src.agent import Player
+from src.domain import Action, CellName
 
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"
@@ -17,7 +19,6 @@ _GREY = "\x1b[90m"
 
 
 def _use_color() -> bool:
-    """Return False when stdout is not a TTY or NO_COLOR is set."""
     if os.environ.get("NO_COLOR"):
         return False
     try:
@@ -146,3 +147,35 @@ def terminal_logger(kind: str, payload: dict) -> None:
     if fmt is None:
         return
     print(fmt(payload))
+
+
+def _jsonify(payload: dict) -> dict:
+    out: dict = {}
+    for k, v in payload.items():
+        if isinstance(v, Player):
+            out[k] = {
+                "unique_id": v.unique_id,
+                "pos": list(v.pos),
+                "has_victim": v.has_victim,
+                "action_points": v.action_points,
+            }
+        elif isinstance(v, Action):
+            out[k] = v.value
+        elif isinstance(v, CellName):
+            out[k] = v.value
+        elif isinstance(v, tuple):
+            out[k] = list(v)
+        else:
+            out[k] = v
+    return out
+
+
+class JsonCollector:
+    def __init__(self) -> None:
+        self.events: list[dict] = []
+
+    def __call__(self, kind: str, payload: dict) -> None:
+        self.events.append({"kind": kind, **_jsonify(payload)})
+
+    def dump(self, result: dict) -> None:
+        print(json.dumps({"events": self.events, "result": result}))

@@ -23,28 +23,10 @@ class Player(Agent):
         self.has_victim = False
 
     def step(self) -> None:
-        """Drain the burst loop synchronously (legacy behavior, used by agents.do('step'))."""
         for _ in self.step_generator():
             pass
 
     def step_generator(self) -> Iterator[None]:
-        """Burst loop that yields control after each AP-consuming action and after
-        every discovery (UNKNOWN reveal / VICTIM pickup / FAKE pickup).
-
-        Discovery is checked at TWO sites so that an agent moving onto an
-        UNKNOWN (or VICTIM/FAKE) cell on its LAST action point still gets a
-        frame for the discovery:
-
-          1. **Spawn time**: ``yield from self._discover_once()`` once before
-             any actions fire. Handles agents placed on UNKNOWN/VICTIM/FAKE
-             cells at startup.
-
-          2. **Post-action**: after each ``emit_action`` we yield, then
-             ``yield from self._discover_once()``. This catches the
-             MOVE-onto-UNKNOWN-on-last-AP case (the loop guard
-             ``while self.action_points > 0`` would otherwise exit before any
-             top-of-iter discovery could run).
-        """
         did_act = False
         self.model.log(
             "agent_turn",
@@ -54,14 +36,9 @@ class Player(Agent):
             carrying=self.has_victim,
         )
 
-        # Spawn-time discovery: agent starts on UNKNOWN / VICTIM / FAKE.
         yield from self._discover_once()
 
         while self.action_points > 0:
-            # Top-of-iter discovery: catch the case where the agent is standing
-            # on a VICTIM/FAKE that was revealed previously and not yet picked
-            # up. Without this, target == self.pos would short-circuit the
-            # loop and leave the VICTIM stranded (fire can then kill it).
             yield from self._discover_once()
 
             x, y = self.pos
@@ -83,10 +60,8 @@ class Player(Agent):
             if target is None:
                 self.model.log("idle", agent=self, reason="no_target")
                 break
+
             if target == self.pos:
-                # Already at the target cell. The top-of-iter discovery
-                # above may have picked up a VICTIM here; if so, fall through
-                # so the next iteration computes a new target (nearest EXIT).
                 if self.has_victim or cdata not in {CellName.UNKNOWN, CellName.VICTIM, CellName.FAKE}:
                     break
 
@@ -121,7 +96,6 @@ class Player(Agent):
             did_act = True
             yield
 
-            # Post-action discovery: catches MOVE-onto-UNKNOWN-on-last-AP.
             yield from self._discover_once()
 
         self.model._try_deliver(self)
@@ -131,21 +105,9 @@ class Player(Agent):
             did_act=did_act,
             ap_remaining=self.action_points,
         )
-        self.reset_action_points()
+        self._reset_action_points()
 
     def _discover_once(self) -> Iterator[None]:
-        """Discover current cell; yield exactly once if anything was discovered.
-
-        Sub-iterator pattern used with ``yield from`` in :meth:`step_generator`.
-        Yields once when a discovery happens (UNKNOWN reveal, VICTIM pickup,
-        or FAKE pickup) and returns nothing otherwise.
-
-        ``UNKNOWN`` reveals are pure exposure: the cell adopts its hidden
-        value (VICTIM, FAKE, …) but ``self.has_victim`` stays False. Other
-        agents can plan against the now-visible VICTIM; the revealing
-        agent decides later whether to pick it up via the VICTIM pickup
-        branch on a subsequent iteration.
-        """
         x, y = self.pos
         cdata = self.model.get_cell_name(x, y)
         if cdata == CellName.UNKNOWN:
@@ -169,7 +131,7 @@ class Player(Agent):
             self.model.log("pickup", agent=self, cell=(x, y), cell_kind="fake")
             yield
 
-    def reset_action_points(self):
+    def _reset_action_points(self):
         self.action_points = 4
 
     def _nearest(self, name: CellName) -> Coord | None:

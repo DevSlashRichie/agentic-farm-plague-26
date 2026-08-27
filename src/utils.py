@@ -93,7 +93,6 @@ def valid_actions(
 
 
 def _action_cost(action: Action, carrying: bool) -> int:
-    """AP cost of a single action. MOVE costs 2 if carrying a victim."""
     if action == Action.MOVE:
         return 2 if carrying else 1
     return {
@@ -104,12 +103,6 @@ def _action_cost(action: Action, carrying: bool) -> int:
 
 
 def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -> list[Action]:
-    """Action sequence to traverse from cell ``c`` to adjacent cell ``neighbor``.
-
-    Order: edge-prep (CHOP_WALL or OPEN_DOOR if needed) → EXTINGUISH
-    if the destination cell is on fire → MOVE. The agent clears fire
-    *before* stepping into the cell.
-    """
     actions: list[Action] = []
     edge = _edge(c, neighbor)
     if edge in model.walls:
@@ -129,25 +122,6 @@ def dijkstra(
     *,
     carrying: bool = False,
 ) -> Optional[list[tuple[Coord, Action]]]:
-    """Find shortest action sequence from ``start`` to ``goal``.
-
-    Returns a list of ``(target_coord, action)`` tuples — one per agent action.
-    ``target_coord`` is the cell the action affects: the neighbor for
-    ``OPEN_DOOR`` / ``CHOP_WALL`` / ``EXTINGUISH`` (the agent stays at
-    ``c``), or the destination for ``MOVE``. The agent's position updates to
-    ``target_coord`` after ``MOVE`` and is unchanged for the others.
-
-    Empty list means ``start == goal``. ``None`` means unreachable.
-
-    Args:
-        model: GameModel holding the grid, walls, doors.
-        start: (x, y) starting coordinate.
-        goal: (x, y) target coordinate.
-        carrying: whether the agent is carrying a victim (MOVE = 2 AP).
-
-    Returns:
-        List of (target_coord, action) tuples, or None.
-    """
     if start == goal:
         return []
 
@@ -184,7 +158,7 @@ def dijkstra(
                 pos_path.append(current)
             pos_path.reverse()
             # Expand each cell-to-cell transition into its action sequence.
-            # target = nbr for every action: the cell the action affects
+            # target = ngbr for every action: the cell the action affects
             # (destination for MOVE; neighbor for OPEN_DOOR/CHOP_WALL/EXTINGUISH).
             action_seq: list[tuple[Coord, Action]] = []
             for i in range(len(pos_path) - 1):

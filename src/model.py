@@ -140,7 +140,6 @@ class GameModel(Model):
         self._spawn_unknowns_to_maintain_three()
 
     def _count_alive_victims(self) -> int:
-        """Count victims currently in play: revealed VICTIM cells plus agents carrying one."""
         count = 0
         for cell in self.grid.all_cells:
             if self._reverse_type_value[cell.cell_type] == CellName.VICTIM:
@@ -151,11 +150,6 @@ class GameModel(Model):
         return count
 
     def _spawn_unknowns_to_maintain_three(self) -> None:
-        """Spawn UNKNOWN cells to bring alive-victim count toward 3 after a rescue.
-
-        Each spawn is independently 50/50 VICTIM or FAKE. Capped at the
-        number of available NONE cells.
-        """
         target = max(0, 3 - self._count_alive_victims())
         if target == 0:
             return
@@ -172,23 +166,11 @@ class GameModel(Model):
             self.log("spawn", cell=(x, y), hidden_kind=kind.value)
 
     def emit_action(self, agent: Player, action: Action, coord: Coord, cost: int) -> None:
-        """Fan out an action event to all subscribed callbacks.
-
-        Fired once per action-point-consuming decision inside ``Player.step``
-        (i.e. after each MOVE / OPEN_DOOR / EXTINGUISH / CHOP_WALL). Free
-        actions like revealing UNKNOWN or picking up a victim do not emit.
-        """
         for cb in self._on_action:
             cb(agent, action, coord, cost)
         self.log("action", agent=agent, action=action, coord=coord, cost=cost)
 
     def log(self, kind: str, **payload) -> None:
-        """Fan out a narrative event to log subscribers.
-
-        ``kind`` is a stable tag (e.g. ``"step_begin"``, ``"rescue"``).
-        Subscribers receive ``(kind, payload_dict)``.
-        Unknown kinds are forward-compatible (subscribers may ignore them).
-        """
         for cb in self._log_subscribers:
             cb(kind, payload)
 
@@ -212,12 +194,6 @@ class GameModel(Model):
                     break
 
     def _smoke_spawn_step(self) -> None:
-        """Pick a random cell uniformly; apply one of three escalations.
-
-        - NONE / VICTIM / FAKE / EXIT / UNKNOWN → becomes SMOKE (overwrite)
-        - SMOKE                                   → becomes FIRE
-        - FIRE                                    → triggers explosion
-        """
         x = self.random.randrange(self.width)
         y = self.random.randrange(self.height)
         cell = self.grid[(y, x)]
@@ -243,7 +219,6 @@ class GameModel(Model):
         )
 
     def _explode_at(self, fx: int, fy: int) -> None:
-        """Spread fire along 4 cardinal rays until non-fire, wall, or map edge."""
         from src.utils import _edge
 
         for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
@@ -280,14 +255,13 @@ class GameModel(Model):
     def _is_end_condition_met(self):
         if self.victims_rescued >= 7:
             return "7 victims rescued"
-            #if self.victims_killed >= 1:
-            #    return "victim killed by fire"
+        if self.victims_killed >= 3:
+            return "victim killed by fire"
         if self.steps >= self.max_steps:
             return "max steps reached"
         return None
 
     def step(self):
-        """Run one full step synchronously by draining advance() to completion."""
         self._in_user_step = True
         try:
             while self.advance():
@@ -296,30 +270,13 @@ class GameModel(Model):
             self._in_user_step = False
 
     def advance(self) -> bool:
-        """Advance the simulation by one action point, across all agents.
-
-        Returns ``True`` if more actions remain in the current step
-        (``fire`` propagation, ``datacollector``, end-condition check not
-        yet executed). Returns ``False`` once the step is finalized.
-
-        Continuous calls drive the simulation AP-by-AP: agent 1 AP-N,
-        agent 2 AP-N, …, agent K AP-N, then agent 1 AP-(N+1), etc.
-        Each call yields control after firing ``emit_action``, ``_try_deliver``,
-        and any ``log()`` callbacks.
-
-        Step counting: ``_do_step`` in Mesa's default EventGenerator already
-        increments ``self.steps`` before invoking ``_user_step`` (our ``step``
-        method) — so when called via ``model.step()``, ``advance()`` does NOT
-        increment again (``self._in_user_step=True`` guard). When called
-        directly (matplotlib live animation, tests driving via ``advance``),
-        ``advance()`` increments ``self.steps`` itself.
-        """
         if not self.running:
             return False
 
         if self._step_state is None:
-            if not getattr(self, "_in_user_step", False):
+            if not self._in_user_step:
                 self.steps += 1
+
             self.log("step_begin", step=self.steps, agents=len(self.agents))
             self._step_state = [(a, a.step_generator()) for a in self.agents]
 
@@ -346,6 +303,5 @@ class GameModel(Model):
         )
         if reason:
             self.running = False
-            print(reason)
         self._step_state = None
         return False

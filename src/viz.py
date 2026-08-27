@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from matplotlib.animation import Animation
     from matplotlib.figure import Figure
 
-    from src.agent import Player
     from src.model import GameModel
 
 
@@ -56,10 +55,6 @@ _ACTION_COLOR = {
 
 
 def quiet_log(kind: str, _payload: dict) -> None:
-    """One-line-per-event debug log: actions, reveals, pickups, rescues, kills.
-
-    Skips noisiest kinds (agent_turn, path, idle, burst_done).
-    """
     if kind == "action":
         agent = _payload["agent"]
         a: Action = _payload["action"]
@@ -156,7 +151,6 @@ def _new_axes(width: int, height: int, figsize: tuple[float, float]):
 
 
 def _cell_artists(width: int, height: int):
-    """Create one Rectangle per cell, return as 2D arrays."""
     tiles = [[None] * height for _ in range(width)]
     glyphs = [[None] * height for _ in range(width)]
     for y in range(height):
@@ -172,7 +166,6 @@ def _cell_artists(width: int, height: int):
 
 
 def _apply_grid(tiles, glyphs, grid_data, width: int, height: int):
-    """Update each tile's facecolor and (re)create its glyph text to match grid_data."""
     for y in range(height):
         for x in range(width):
             cell = grid_data[x][y]
@@ -196,7 +189,6 @@ def _apply_grid(tiles, glyphs, grid_data, width: int, height: int):
 
 
 def _edge_segment(edge: tuple[Coord, Coord]) -> tuple[list[float], list[float]]:
-    """Return ((x1, x2), (y1, y2)) for the Line2D plotting the shared boundary."""
     (x1, y1), (x2, y2) = edge
     if x1 == x2:
         y = max(y1, y2)
@@ -210,7 +202,6 @@ def _make_edge_artists(
     doors: dict[tuple[Coord, Coord], bool],
     ax,
 ) -> tuple[dict[tuple[Coord, Coord], Line2D], dict[tuple[Coord, Coord], Line2D]]:
-    """Create wall and door Line2D artists, keyed by edge for stable identity tracking."""
     wall_lines: dict[tuple[Coord, Coord], Line2D] = {}
     for edge in sorted(walls):
         xs, ys = _edge_segment(edge)
@@ -236,7 +227,6 @@ def _refresh_edges(
     wall_lines: dict[tuple[Coord, Coord], Line2D],
     door_lines: dict[tuple[Coord, Coord], Line2D],
 ) -> None:
-    """Sync artists with current walls/doors state (chopped walls hidden, open doors faded)."""
     for edge, line in wall_lines.items():
         line.set_visible(edge in walls)
 
@@ -337,16 +327,6 @@ def animate_simulation(
     show: bool = True,
     save_path: str | None = None,
 ) -> Animation:
-    """Animate the simulation live: each matplotlib frame drives one AP.
-
-    Live mode (not pre-run): the matplotlib timer ticks at ``interval_ms`` and
-    each tick advances the model by one action point (``model.advance()`` call).
-    Log subscribers fire inline as the model advances, so terminal output and
-    matplotlib rendering move in lockstep one decision at a time. Once the
-    ``model.advance()`` chain finalizes the current step (and returns False),
-    the figure stays on the final state until the window is closed (or until
-    the Pillow writer exhausts the frame budget when ``save_path`` is set).
-    """
     width = model.width
     height = model.height
 
