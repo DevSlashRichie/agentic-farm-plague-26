@@ -1,3 +1,7 @@
+# This file (src/viz.py) was generated with the assistance of an AI coding tool
+# It contains the visualization and animation logic for the
+# Flashpoint simulation with matplotlib map rendering.
+
 from __future__ import annotations
 
 import os
