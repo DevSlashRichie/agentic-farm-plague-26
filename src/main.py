@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from src.log import JsonCollector, _BOLD, _c, terminal_logger
+from src.maps import default_map
 from src.model import GameModel
 
 
@@ -15,9 +16,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    model = GameModel()
+    map_data = default_map()
+    model = GameModel(map_data=map_data)
     if args.json:
-        collector = JsonCollector()
+        collector = JsonCollector(map_data, model.agents)
         model._log_subscribers.append(collector)
     else:
         model._log_subscribers.append(terminal_logger)
@@ -36,6 +38,7 @@ def main() -> None:
         "steps": model.steps,
         "rescued": model.victims_rescued,
         "killed": model.victims_killed,
+        "end_reason": model._is_end_condition_met() or "running",
     }
     if args.json:
         collector.dump(result)

@@ -149,33 +149,189 @@ def terminal_logger(kind: str, payload: dict) -> None:
     print(fmt(payload))
 
 
-def _jsonify(payload: dict) -> dict:
-    out: dict = {}
-    for k, v in payload.items():
-        if isinstance(v, Player):
-            out[k] = {
-                "unique_id": v.unique_id,
-                "pos": list(v.pos),
-                "has_victim": v.has_victim,
-                "action_points": v.action_points,
-            }
-        elif isinstance(v, Action):
-            out[k] = v.value
-        elif isinstance(v, CellName):
-            out[k] = v.value
-        elif isinstance(v, tuple):
-            out[k] = list(v)
-        else:
-            out[k] = v
-    return out
+def map_to_json(map_data: dict) -> dict:
+    return {
+        "width": map_data["columns"],
+        "height": map_data["rows"],
+        "cells": map_data["matrix"],
+        "walls": [list(map(list, w)) for w in map_data["walls"]],
+        "doors": [list(map(list, d)) for d in map_data["doors"]],
+    }
+
+
+def agents_to_json(agents) -> list[dict]:
+    return [
+        {"id": a.unique_id, "pos": list(a.pos), "carrying": a.has_victim}
+        for a in agents
+    ]
+
+
+def _cell_key(pos: tuple[int, int]) -> tuple[int, int]:
+    return (pos[0], pos[1])
 
 
 class JsonCollector:
-    def __init__(self) -> None:
-        self.events: list[dict] = []
+    def __init__(self, map_data: dict, agents) -> None:
+        self.map_json = map_to_json(map_data)
+        self.agents_json = agents_to_json(agents)
+
+        self._cell_states: dict[tuple[int, int], str] = {}
+        for y, row in enumerate(map_data["matrix"]):
+            for x, cell_name in enumerate(row):
+                self._cell_states[(x, y)] = cell_name
+
+        self._steps: list[dict] = []
+        self._current_events: list[dict] = []
+        self._current_step: int | None = None
+        self._explode_buffer: dict[tuple[int, int], list[list[int]]] = {}
+        self._agent_positions: dict[int, tuple[int, int]] = {}
+        for a in agents:
+            self._agent_positions[a.unique_id] = a.pos
 
     def __call__(self, kind: str, payload: dict) -> None:
-        self.events.append({"kind": kind, **_jsonify(payload)})
+        if kind == "step_begin":
+            self._flush_explodes()
+            self._current_step = payload["step"]
+            return
+
+        if kind == "step_end":
+            self._flush_explodes()
+            if self._current_step is not None:
+                self._steps.append({
+                    "step": self._current_step,
+                    "events": self._current_events,
+                })
+                self._current_events = []
+                self._current_step = None
+            return
+
+        delta = self._transform(kind, payload)
+        if delta is None:
+            return
+        if isinstance(delta, list):
+            self._current_events.extend(delta)
+        else:
+            self._current_events.append(delta)
+
+    def _transform(self, kind: str, payload: dict) -> dict | None:
+        if kind == "action":
+            return self._transform_action(payload)
+        if kind == "reveal":
+            return self._transform_reveal(payload)
+        if kind == "spawn":
+            return self._transform_spawn(payload)
+        if kind == "smoke_spawn":
+            return self._transform_smoke_spawn(payload)
+        if kind == "explode":
+            return self._buffer_explode(payload)
+        if kind == "pickup":
+            return self._transform_pickup(payload)
+        if kind == "rescue":
+            return self._transform_rescue(payload)
+        if kind == "kill":
+            return self._transform_kill(payload)
+        return None
+
+    def _transform_action(self, p: dict) -> dict:
+        action: Action = p["action"]
+        coord: tuple[int, int] = p["coord"]
+        agent_id: int = p["agent"].unique_id
+
+        if action == Action.MOVE:
+            prev = self._agent_positions.get(agent_id, p["agent"].pos)
+            self._agent_positions[agent_id] = coord
+            return {"type": "move", "agent": agent_id, "from": list(prev), "to": list(coord)}
+        if action == Action.EXTINGUISH:
+            key = _cell_key(coord)
+            from_state = self._cell_states.get(key, "fire")
+            self._cell_states[key] = "none"
+            return [
+                {"type": "cell_change", "pos": list(coord), "from": from_state, "to": "none"},
+                {"type": "extinguish", "agent": agent_id, "pos": list(coord)},
+            ]
+        if action == Action.OPEN_DOOR:
+            return {"type": "door_open", "agent": agent_id, "from": list(p["agent"].pos), "to": list(coord)}
+        if action == Action.CHOP_WALL:
+            return {"type": "wall_chop", "agent": agent_id, "from": list(p["agent"].pos), "to": list(coord)}
+        return {"type": action.value, "agent": agent_id, "pos": list(coord)}
+
+    def _transform_reveal(self, p: dict) -> dict:
+        cell: tuple[int, int] = p["cell"]
+        hidden: CellName = p["hidden"]
+        key = _cell_key(cell)
+        from_state = self._cell_states.get(key, "unknown")
+        self._cell_states[key] = hidden.value
+        return {"type": "cell_change", "pos": list(cell), "from": from_state, "to": hidden.value}
+
+    def _transform_spawn(self, p: dict) -> dict:
+        cell: tuple[int, int] = p["cell"]
+        key = _cell_key(cell)
+        from_state = self._cell_states.get(key, "none")
+        self._cell_states[key] = "unknown"
+        return {"type": "cell_change", "pos": list(cell), "from": from_state, "to": "unknown"}
+
+    def _transform_smoke_spawn(self, p: dict) -> dict | None:
+        cell: tuple[int, int] = p["cell"]
+        was: str = p["was"]
+        became: str = p["became"]
+
+        if became == "fire_explode":
+            return None
+
+        key = _cell_key(cell)
+        self._cell_states[key] = became
+        return {"type": "cell_change", "pos": list(cell), "from": was, "to": became}
+
+    def _buffer_explode(self, p: dict) -> None:
+        origin: tuple[int, int] = p["origin"]
+        cell: tuple[int, int] = p["cell"]
+        key = _cell_key(cell)
+        self._cell_states[key] = "fire"
+
+        if origin not in self._explode_buffer:
+            self._explode_buffer[origin] = []
+        self._explode_buffer[origin].append(list(cell))
+        return None
+
+    def _flush_explodes(self) -> None:
+        for origin, cells in self._explode_buffer.items():
+            self._current_events.append({
+                "type": "fire_spread",
+                "origin": list(origin),
+                "cells": cells,
+            })
+        self._explode_buffer.clear()
+
+    def _transform_pickup(self, p: dict) -> dict:
+        return {
+            "type": "pickup",
+            "agent": p["agent"].unique_id,
+            "pos": list(p["cell"]),
+            "kind": p["cell_kind"],
+        }
+
+    def _transform_rescue(self, p: dict) -> dict:
+        return {
+            "type": "rescue",
+            "agent": p["agent"].unique_id,
+            "pos": list(p["pos"]),
+            "total": p["total"],
+        }
+
+    def _transform_kill(self, p: dict) -> list[dict]:
+        pos: tuple[int, int] = p["pos"]
+        key = _cell_key(pos)
+        self._cell_states[key] = "fire"
+        return [
+            {"type": "cell_change", "pos": list(pos), "from": "victim", "to": "fire"},
+            {"type": "kill", "pos": list(pos), "total": p["total"]},
+        ]
 
     def dump(self, result: dict) -> None:
-        print(json.dumps({"events": self.events, "result": result}))
+        self._flush_explodes()
+        print(json.dumps({
+            "map": self.map_json,
+            "agents": self.agents_json,
+            "steps": self._steps,
+            "result": result,
+        }))
