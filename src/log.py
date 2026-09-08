@@ -240,20 +240,48 @@ class JsonCollector:
         if action == Action.MOVE:
             prev = self._agent_positions.get(agent_id, p["agent"].pos)
             self._agent_positions[agent_id] = coord
-            return {"type": "move", "agent": agent_id, "from": list(prev), "to": list(coord)}
+            return {
+                "type": "move",
+                "agent": agent_id,
+                "from": list(prev),
+                "to": list(coord),
+                "ap_remaining": p["agent"].action_points,
+            }
         if action == Action.EXTINGUISH:
             key = _cell_key(coord)
             from_state = self._cell_states.get(key, "fire")
             self._cell_states[key] = "none"
             return [
                 {"type": "cell_change", "pos": list(coord), "from": from_state, "to": "none"},
-                {"type": "extinguish", "agent": agent_id, "pos": list(coord)},
+                {
+                    "type": "extinguish",
+                    "agent": agent_id,
+                    "pos": list(coord),
+                    "ap_remaining": p["agent"].action_points,
+                },
             ]
         if action == Action.OPEN_DOOR:
-            return {"type": "door_open", "agent": agent_id, "from": list(p["agent"].pos), "to": list(coord)}
+            return {
+                "type": "door_open",
+                "agent": agent_id,
+                "from": list(p["agent"].pos),
+                "to": list(coord),
+                "ap_remaining": p["agent"].action_points,
+            }
         if action == Action.CHOP_WALL:
-            return {"type": "wall_chop", "agent": agent_id, "from": list(p["agent"].pos), "to": list(coord)}
-        return {"type": action.value, "agent": agent_id, "pos": list(coord)}
+            return {
+                "type": "wall_chop",
+                "agent": agent_id,
+                "from": list(p["agent"].pos),
+                "to": list(coord),
+                "ap_remaining": p["agent"].action_points,
+            }
+        return {
+            "type": action.value,
+            "agent": agent_id,
+            "pos": list(coord),
+            "ap_remaining": p["agent"].action_points,
+        }
 
     def _transform_reveal(self, p: dict) -> dict:
         cell: tuple[int, int] = p["cell"]
@@ -308,6 +336,7 @@ class JsonCollector:
             "agent": p["agent"].unique_id,
             "pos": list(p["cell"]),
             "kind": p["cell_kind"],
+            "ap_remaining": p["agent"].action_points,
         }
 
     def _transform_rescue(self, p: dict) -> dict:
@@ -316,6 +345,7 @@ class JsonCollector:
             "agent": p["agent"].unique_id,
             "pos": list(p["pos"]),
             "total": p["total"],
+            "ap_remaining": p["agent"].action_points,
         }
 
     def _transform_kill(self, p: dict) -> list[dict]:
