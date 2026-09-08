@@ -49,6 +49,7 @@ def main() -> None:
         "steps": model.steps,
         "rescued": model.victims_rescued,
         "killed": model.victims_killed,
+        "structural_damage": model.structural_damage,
         "end_reason": model._is_end_condition_met() or "running",
     }
     if args.json:
@@ -58,7 +59,8 @@ def main() -> None:
             _c(
                 _BOLD,
                 f"Simulation ended after {model.steps} steps "
-                f"(rescued={model.victims_rescued}, killed={model.victims_killed})",
+                f"(rescued={model.victims_rescued}, killed={model.victims_killed}, "
+                f"damage={model.structural_damage})",
             )
         )
 

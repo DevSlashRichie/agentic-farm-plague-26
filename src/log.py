@@ -56,9 +56,10 @@ def _f_step_begin(p: dict) -> str:
 def _f_step_end(p: dict) -> str:
     running = "✓ running" if p["running"] else "✗ stopped"
     extras = f" [{p['end_reason']}]" if p.get("end_reason") else ""
+    damage = p.get("structural_damage", 0)
     return _c(
         _GREY,
-        f"─── step {p['step']} end (rescued={p['rescued']}, killed={p['killed']}, {running}) ───{extras}",
+        f"─── step {p['step']} end (rescued={p['rescued']}, killed={p['killed']}, damage={damage}, {running}) ───{extras}",
     )
 
 
@@ -123,6 +124,17 @@ def _f_explode(p: dict) -> str:
     return _c(_BOLD + _RED, f"  💥 explode → fire @ {p['cell']} (origin {p['origin']})")
 
 
+def _f_structural_damage(p: dict) -> str:
+    return _c(
+        _BOLD + _YELLOW,
+        f"  ▓ STRUCTURAL +{p['amount']} ({p['reason']}) total={p['total']}",
+    )
+
+
+def _f_collapse(p: dict) -> str:
+    return _c(_BOLD + _RED, f"  ✖ COLLAPSE! structural damage={p['total']} (>= 24)")
+
+
 FORMATTERS: dict[str, Callable[[dict], str]] = {
     "step_begin": _f_step_begin,
     "step_end": _f_step_end,
@@ -139,6 +151,8 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "spawn": _f_spawn,
     "smoke_spawn": _f_smoke_spawn,
     "explode": _f_explode,
+    "structural_damage": _f_structural_damage,
+    "collapse": _f_collapse,
 }
 
 
@@ -230,6 +244,10 @@ class JsonCollector:
             return self._transform_rescue(payload)
         if kind == "kill":
             return self._transform_kill(payload)
+        if kind == "structural_damage":
+            return self._transform_structural_damage(payload)
+        if kind == "collapse":
+            return {"type": "collapse", "total": payload["total"]}
         return None
 
     def _transform_action(self, p: dict) -> dict:
@@ -274,6 +292,7 @@ class JsonCollector:
                 "agent": agent_id,
                 "from": list(p["agent"].pos),
                 "to": list(coord),
+                "damage": 2,
                 "ap_remaining": p["agent"].action_points,
             }
         return {
@@ -356,6 +375,20 @@ class JsonCollector:
             {"type": "cell_change", "pos": list(pos), "from": "victim", "to": "fire"},
             {"type": "kill", "pos": list(pos), "total": p["total"]},
         ]
+
+    def _transform_structural_damage(self, p: dict) -> dict:
+        event: dict = {
+            "type": "structural_damage",
+            "reason": p["reason"],
+            "amount": p["amount"],
+            "total": p["total"],
+        }
+        if p.get("pos") is not None:
+            event["pos"] = list(p["pos"])
+        if p.get("edge") is not None:
+            a, b = p["edge"]
+            event["edge"] = [list(a), list(b)]
+        return event
 
     def to_dict(self, result: dict) -> dict:
         self._flush_explodes()

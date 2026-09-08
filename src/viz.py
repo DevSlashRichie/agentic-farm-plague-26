@@ -90,6 +90,10 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_CYAN, f"  ~ smoke_spawn {_payload['was']}→{_payload['became']} @ {_payload['cell']}"))
     elif kind == "explode":
         print(_c(_RED, f"  💥 explode → fire @ {_payload['cell']} (origin {_payload['origin']})"))
+    elif kind == "structural_damage":
+        print(_c(_YELLOW, f"  ▓ STRUCTURAL +{_payload['amount']} ({_payload['reason']}) total={_payload['total']}"))
+    elif kind == "collapse":
+        print(_c(_RED, f"  ✖ COLLAPSE! damage={_payload['total']} (>= 24)"))
 
 
 CELL_STYLE: dict[CellName, dict] = {
@@ -390,6 +394,7 @@ def animate_simulation(
             "steps": model.steps,
             "rescued": model.victims_rescued,
             "killed": model.victims_killed,
+            "structural_damage": model.structural_damage,
         }
 
     def apply() -> list:
@@ -405,8 +410,8 @@ def animate_simulation(
             else:
                 marker.set_visible(False)
         score_text.set_text(
-            f"step {snap['steps']} \u00B7 rescued {snap['rescued']} "
-            f"\u00B7 killed {snap['killed']} \u00B7 active {len(agents)}"
+            f"step {snap['steps']} · rescued {snap['rescued']} "
+            f"· killed {snap['killed']} · dmg {snap['structural_damage']}/24 · active {len(agents)}"
         )
         title_text.set_text(
             f"Flashpoint \u2014 step {snap['steps']} / {model.max_steps}"

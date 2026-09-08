@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 
 class GameModel(Model):
+    STRUCTURAL_LIMIT = 24
+
     def __init__(
         self,
         agents=6,
@@ -28,6 +30,7 @@ class GameModel(Model):
 
         self.victims_killed = 0
         self.victims_rescued = 0
+        self.structural_damage = 0
 
         self.max_steps = max_steps
         self._load_map(map_data)
@@ -38,6 +41,7 @@ class GameModel(Model):
                 "steps": lambda model: model.steps,
                 "victims_rescued": lambda model: model.victims_rescued,
                 "victims_killed": lambda model: model.victims_killed,
+                "structural_damage": lambda model: model.structural_damage,
             },
         )
 
@@ -170,6 +174,26 @@ class GameModel(Model):
             cb(agent, action, coord, cost)
         self.log("action", agent=agent, action=action, coord=coord, cost=cost)
 
+    def add_structural_damage(
+        self,
+        amount: int,
+        *,
+        reason: str,
+        pos: Coord | None = None,
+        edge: tuple[Coord, Coord] | None = None,
+    ) -> None:
+        self.structural_damage += amount
+        self.log(
+            "structural_damage",
+            amount=amount,
+            reason=reason,
+            total=self.structural_damage,
+            pos=pos,
+            edge=edge,
+        )
+        if self.structural_damage >= self.STRUCTURAL_LIMIT:
+            self.log("collapse", total=self.structural_damage)
+
     def log(self, kind: str, **payload) -> None:
         for cb in self._log_subscribers:
             cb(kind, payload)
@@ -227,6 +251,12 @@ class GameModel(Model):
             while 0 <= cx < self.width and 0 <= cy < self.height:
                 cur = (cx, cy)
                 if _edge(prev, cur) in self.walls:
+                    self.add_structural_damage(
+                        1,
+                        reason="explosion",
+                        pos=cur,
+                        edge=_edge(prev, cur),
+                    )
                     break
                 if self.get_cell_name(cx, cy) == CellName.FIRE:
                     prev = cur
@@ -257,6 +287,8 @@ class GameModel(Model):
             return "7 victims rescued"
         if self.victims_killed >= 3:
             return "victim killed by fire"
+        if self.structural_damage >= self.STRUCTURAL_LIMIT:
+            return "structural collapse (damage >= 24)"
         if self.steps >= self.max_steps:
             return "max steps reached"
         return None
@@ -298,6 +330,7 @@ class GameModel(Model):
             step=self.steps,
             rescued=self.victims_rescued,
             killed=self.victims_killed,
+            structural_damage=self.structural_damage,
             running=self.running,
             end_reason=reason,
         )

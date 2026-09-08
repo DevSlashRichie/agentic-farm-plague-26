@@ -88,7 +88,15 @@ class Player(Agent):
             elif action == Action.EXTINGUISH:
                 self.model.set_cell_name(action_target[0], action_target[1], CellName.NONE)
             elif action == Action.CHOP_WALL:
-                self.model.walls.discard(_edge(self.pos, action_target))
+                edge = _edge(self.pos, action_target)
+                if edge in self.model.walls:
+                    self.model.walls.discard(edge)
+                    self.model.add_structural_damage(
+                        2,
+                        reason="chop",
+                        pos=action_target,
+                        edge=edge,
+                    )
 
             self.action_points -= cost
             self.model.emit_action(self, action, action_target, cost)

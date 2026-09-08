@@ -25,6 +25,7 @@ def run_simulation() -> dict:
         "steps": model.steps,
         "rescued": model.victims_rescued,
         "killed": model.victims_killed,
+        "structural_damage": model.structural_damage,
         "end_reason": model._is_end_condition_met() or "running",
     }
     return collector.to_dict(result)
