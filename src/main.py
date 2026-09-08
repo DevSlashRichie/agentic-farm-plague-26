@@ -14,7 +14,18 @@ def main() -> None:
         action="store_true",
         help="Emit a single big JSON object with all events + final result.",
     )
+    parser.add_argument(
+        "--server",
+        action="store_true",
+        help="Serve a new simulation as JSON on http://0.0.0.0:8000/.",
+    )
     args = parser.parse_args()
+
+    if args.server:
+        from src.http import serve
+
+        serve()
+        return
 
     map_data = default_map()
     model = GameModel(map_data=map_data)

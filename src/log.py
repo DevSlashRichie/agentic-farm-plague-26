@@ -327,11 +327,14 @@ class JsonCollector:
             {"type": "kill", "pos": list(pos), "total": p["total"]},
         ]
 
-    def dump(self, result: dict) -> None:
+    def to_dict(self, result: dict) -> dict:
         self._flush_explodes()
-        print(json.dumps({
+        return {
             "map": self.map_json,
             "agents": self.agents_json,
             "steps": self._steps,
             "result": result,
-        }))
+        }
+
+    def dump(self, result: dict) -> None:
+        print(json.dumps(self.to_dict(result)))
