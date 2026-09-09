@@ -141,7 +141,6 @@ class GameModel(Model):
             pos=(x, y),
             total=self.victims_rescued,
         )
-        self._spawn_unknowns_to_maintain_three()
 
     def _count_alive_victims(self) -> int:
         count = 0
@@ -326,10 +325,11 @@ class GameModel(Model):
                 return True
             except StopIteration:
                 self._step_state.pop(0)
+                self._smoke_spawn_step()
+                self._kill_victims_in_fire()
+                self._spawn_unknowns_to_maintain_three()
                 continue
 
-        self._kill_victims_in_fire()
-        self._smoke_spawn_step()
         self.datacollector.collect(self)
         reason = self._is_end_condition_met()
         self.log(
