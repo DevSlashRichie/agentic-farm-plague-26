@@ -9,6 +9,7 @@ dependencies = [
     "mesa>=3.5.1",
     "networkx>=3.6.1",
     "numpy>=2.5.2",
+    "rich>=15.0.0",
     "scikit-learn>=1.9.0",
     "scipy>=1.18.0",
     "seaborn>=0.13.2",

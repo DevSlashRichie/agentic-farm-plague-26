@@ -24,7 +24,7 @@ class GameModel(Model):
         map_data: MapData | None = None,
         seed: float | int | None = None,
     ):
-        super().__init__(seed=seed)
+        super().__init__(rng=seed)
         if map_data is None:
             map_data = default_map()
 
