@@ -153,8 +153,15 @@ class GameModel(Model):
                 count += 1
         return count
 
+    def _count_unknowns(self) -> int:
+        count = 0
+        for cell in self.grid.all_cells:
+            if self._reverse_type_value[cell.cell_type] == CellName.UNKNOWN:
+                count += 1
+        return count
+
     def _spawn_unknowns_to_maintain_three(self) -> None:
-        target = max(0, 3 - self._count_alive_victims())
+        target = max(0, 3 - self._count_unknowns())
         if target == 0:
             return
         candidates = self.get_cells_by_name(CellName.NONE)
