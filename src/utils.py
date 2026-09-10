@@ -104,6 +104,18 @@ def _action_cost(action: Action, carrying: bool) -> int:
     }.get(action, 1)
 
 
+# Split extinguish economy: killing FIRE costs 2 AP, venting SMOKE costs 1.
+FIRE_EXTINGUISH_COST = 2
+SMOKE_EXTINGUISH_COST = 1
+
+
+def _extinguish_cost(model: GameModel, coord: Coord) -> int:
+    """AP cost to extinguish a cell by what is actually on it."""
+    if model.get_cell_name(*coord) == CellName.FIRE:
+        return FIRE_EXTINGUISH_COST
+    return SMOKE_EXTINGUISH_COST
+
+
 def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -> list[Action]:
     actions: list[Action] = []
     edge = _edge(c, neighbor)
@@ -139,7 +151,13 @@ def dijkstra(
         return [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
 
     def edge_cost_total(c: Coord, neighbor: Coord) -> int:
-        return sum(_action_cost(a, carrying) for a in _edge_actions(model, c, neighbor, carrying))
+        total = 0
+        for a in _edge_actions(model, c, neighbor, carrying):
+            if a == Action.EXTINGUISH:
+                total += _extinguish_cost(model, neighbor)
+            else:
+                total += _action_cost(a, carrying)
+        return total
 
     counter = 0
     open_set: list[tuple[int, int, Coord]] = []

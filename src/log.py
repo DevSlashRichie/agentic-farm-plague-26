@@ -132,6 +132,16 @@ def _f_structural_damage(p: dict) -> str:
     )
 
 
+def _f_wall_damaged(p: dict) -> str:
+    a, b = p["edge"]
+    return _c(_YELLOW, f"  ▓ wall damaged {list(a)}↔{list(b)} (hp={p['hp']})")
+
+
+def _f_wall_destroyed(p: dict) -> str:
+    a, b = p["edge"]
+    return _c(_BOLD + _YELLOW, f"  ▓ WALL DESTROYED {list(a)}↔{list(b)}")
+
+
 def _f_poi_reshuffle(p: dict) -> str:
     return _c(_CYAN, f"  ◇ POI deck reshuffled ({p['reals']} real + {p['empties']} empty)")
 
@@ -174,6 +184,8 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "smoke_spawn": _f_smoke_spawn,
     "explode": _f_explode,
     "structural_damage": _f_structural_damage,
+    "wall_damaged": _f_wall_damaged,
+    "wall_destroyed": _f_wall_destroyed,
     "poi_reshuffle": _f_poi_reshuffle,
     "collapse": _f_collapse,
     "knockdown": _f_knockdown,
@@ -295,6 +307,19 @@ class JsonCollector:
             }
         if kind == "structural_damage":
             return self._transform_structural_damage(payload)
+        if kind == "wall_damaged":
+            a, b = payload["edge"]
+            return {
+                "type": "wall_damaged",
+                "edge": [list(a), list(b)],
+                "hp": payload["hp"],
+            }
+        if kind == "wall_destroyed":
+            a, b = payload["edge"]
+            return {
+                "type": "wall_destroyed",
+                "edge": [list(a), list(b)],
+            }
         if kind == "poi_reshuffle":
             return {
                 "type": "poi_reshuffle",

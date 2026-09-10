@@ -33,6 +33,11 @@ CHOP_DAMAGE = 2
 POI_DECK_REALS = 12
 POI_DECK_EMPTIES = 6
 
+# Wall health: every wall segment starts with this many HP. A blocked
+# explosion blast ticks 1 HP (no structural damage); at 0 the wall breaks
+# for +2 structural damage and the edge becomes passable.
+WALL_MAX_HP = 2
+
 
 class MapData(TypedDict):
     rows: int

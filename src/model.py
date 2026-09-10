@@ -7,7 +7,14 @@ from mesa import DataCollector, Model
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 
 from src.agent import Player
-from src.domain import POI_DECK_EMPTIES, POI_DECK_REALS, CellName, Coord, MapData
+from src.domain import (
+    POI_DECK_EMPTIES,
+    POI_DECK_REALS,
+    WALL_MAX_HP,
+    CellName,
+    Coord,
+    MapData,
+)
 from src.maps import default_map
 
 if TYPE_CHECKING:
@@ -125,6 +132,8 @@ class GameModel(Model):
         self.walls: set[tuple[Coord, Coord]] = set()
         for a, b in map_data["walls"]:
             self.walls.add(self._edge(a, b))
+        # HP only tracked once grazed; missing edges are at full health.
+        self.wall_hp: dict[tuple[Coord, Coord], int] = {}
 
         self.doors: dict[tuple[Coord, Coord], bool] = {}
         for a, b in map_data["doors"]:
@@ -326,6 +335,27 @@ class GameModel(Model):
             became=became.value,
         )
 
+    def wall_hp_of(self, edge: tuple[Coord, Coord]) -> int:
+        return self.wall_hp.get(edge, WALL_MAX_HP)
+
+    def _tick_wall(self, edge: tuple[Coord, Coord], pos: Coord) -> None:
+        if edge not in self.walls:
+            return
+        hp = self.wall_hp_of(edge) - 1
+        if hp <= 0:
+            self.walls.discard(edge)
+            self.wall_hp.pop(edge, None)
+            self.log("wall_destroyed", edge=edge, pos=pos)
+            self.add_structural_damage(
+                2,
+                reason="wall_break",
+                pos=pos,
+                edge=edge,
+            )
+            return
+        self.wall_hp[edge] = hp
+        self.log("wall_damaged", edge=edge, pos=pos, hp=hp)
+
     def _explode_at(self, fx: int, fy: int) -> None:
         from src.utils import _edge
 
@@ -335,12 +365,7 @@ class GameModel(Model):
             while 0 <= cx < self.width and 0 <= cy < self.height:
                 cur = (cx, cy)
                 if _edge(prev, cur) in self.walls:
-                    self.add_structural_damage(
-                        1,
-                        reason="explosion",
-                        pos=cur,
-                        edge=_edge(prev, cur),
-                    )
+                    self._tick_wall(_edge(prev, cur), cur)
                     break
                 if self.get_cell_name(cx, cy) == CellName.FIRE:
                     prev = cur
