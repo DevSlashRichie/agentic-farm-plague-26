@@ -65,7 +65,8 @@ def quiet_log(kind: str, _payload: dict) -> None:
         color = _ACTION_COLOR.get(a, "")
         step_num = agent.model.steps
         step_label = _c(_DIM, f"step {step_num}")
-        agent_label = f"#{agent.unique_id}@{tuple(agent.pos)}"
+        pos = tuple(agent.pos) if agent.pos is not None else "AMBULANCE"
+        agent_label = f"#{agent.unique_id}@{pos}"
         action_label = _c(color, a.value.upper())
         print(
             f"{step_label}  {agent_label}  "
@@ -94,6 +95,14 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_YELLOW, f"  ▓ STRUCTURAL +{_payload['amount']} ({_payload['reason']}) total={_payload['total']}"))
     elif kind == "collapse":
         print(_c(_RED, f"  ✖ COLLAPSE! damage={_payload['total']} (>= 24)"))
+    elif kind == "knockdown":
+        print(_c(_RED, f"  🚑 KNOCKDOWN #{_payload['agent'].unique_id} fire@{_payload['pos']} → ambulance"))
+    elif kind == "respawn":
+        print(_c(_GREEN, f"  🚑 RESPAWN #{_payload['agent'].unique_id} → {_payload['pos']}"))
+    elif kind == "ambulance_hold":
+        print(_c(_DIM, f"    ↳ in ambulance #{_payload['agent'].unique_id}"))
+    elif kind == "respawn_wait":
+        print(_c(_YELLOW, f"    ↳ respawn blocked, spawn {_payload.get('spawn')} on fire"))
 
 
 CELL_STYLE: dict[CellName, dict] = {
@@ -390,7 +399,15 @@ def animate_simulation(
             ],
             "walls": set(model.walls),
             "doors": dict(model.doors),
-            "agents": [(a.unique_id, tuple(a.pos), a.has_victim) for a in model.agents],
+            "agents": [
+                (
+                    a.unique_id,
+                    tuple(a.pos) if a.pos is not None else None,
+                    a.has_victim,
+                    a.in_ambulance,
+                )
+                for a in model.agents
+            ],
             "steps": model.steps,
             "rescued": model.victims_rescued,
             "killed": model.victims_killed,
@@ -402,16 +419,18 @@ def animate_simulation(
         _apply_grid(tiles, glyphs, snap["grid"], width, height)
         _refresh_edges(snap["walls"], snap["doors"], wall_lines, door_lines)
         agents = snap["agents"]
+        visible = [a for a in agents if not a[3] and a[1] is not None]
         for i, marker in enumerate(markers):
-            if i < len(agents):
-                uid, pos, carrying = agents[i]
+            if i < len(visible):
+                uid, pos, carrying, _amb = visible[i]
+                assert pos is not None
                 _set_agent_marker(marker, pos, carrying, agent_color(uid))
                 marker.set_visible(True)
             else:
                 marker.set_visible(False)
         score_text.set_text(
             f"step {snap['steps']} · rescued {snap['rescued']} "
-            f"· killed {snap['killed']} · dmg {snap['structural_damage']}/24 · active {len(agents)}"
+            f"· killed {snap['killed']} · dmg {snap['structural_damage']}/24 · active {len(visible)}/{len(agents)}"
         )
         title_text.set_text(
             f"Flashpoint \u2014 step {snap['steps']} / {model.max_steps}"

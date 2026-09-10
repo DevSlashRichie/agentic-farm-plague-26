@@ -74,6 +74,8 @@ def valid_actions(
     agent: Player,
     to_pos: Coord | None = None,
 ) -> list[ActionOption]:
+    if agent.pos is None or agent.in_ambulance:
+        return []
     from_pos = agent.pos
     carrying_victim = agent.has_victim
 

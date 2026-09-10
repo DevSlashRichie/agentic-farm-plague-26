@@ -113,7 +113,8 @@ class GameModel(Model):
             return
         for i in range(count):
             exit_cell = exits[i % len(exits)]
-            Player(self, (exit_cell["x"], exit_cell["y"]))
+            pos = (exit_cell["x"], exit_cell["y"])
+            Player(self, pos, spawn_pos=pos)
 
     def get_cell_name(self, x: int, y: int) -> CellName:
         return self._reverse_type_value[self.grid[(y, x)].cell_type]
@@ -129,6 +130,8 @@ class GameModel(Model):
 
     def _try_deliver(self, agent: Player) -> None:
         if not agent.has_victim:
+            return
+        if agent.in_ambulance or agent.pos is None:
             return
         x, y = agent.pos
         if self.get_cell_name(x, y) != CellName.EXIT:
@@ -222,6 +225,58 @@ class GameModel(Model):
                         total=self.victims_killed,
                     )
                     break
+
+    def _send_to_ambulance(self, agent: Player) -> None:
+        if agent.in_ambulance:
+            return
+        knockdown_pos = agent.pos
+        had_victim = agent.has_victim
+        agent.has_victim = False
+        if had_victim and knockdown_pos is not None:
+            self.victims_killed += 1
+            self.log(
+                "kill",
+                pos=knockdown_pos,
+                total=self.victims_killed,
+                carried=True,
+                agent=agent,
+            )
+        # Remove from coords grid: off-grid state, pos is None.
+        agent.pos = None
+        agent.in_ambulance = True
+        agent.ambulance_cooldown = 1
+        agent.action_points = 4
+        self.log(
+            "knockdown",
+            agent=agent,
+            pos=knockdown_pos,
+            spawn=agent.spawn_pos,
+            had_victim=had_victim,
+        )
+
+    def _knockdown_agents_on_fire(self) -> None:
+        for agent in self.agents:
+            if agent.in_ambulance or agent.pos is None:
+                continue
+            x, y = agent.pos
+            if self.get_cell_name(x, y) == CellName.FIRE:
+                self._send_to_ambulance(agent)
+
+    def _try_respawn(self, agent: Player) -> bool:
+        sx, sy = agent.spawn_pos
+        if self.get_cell_name(sx, sy) == CellName.FIRE:
+            return False
+        agent.pos = (sx, sy)
+        agent.in_ambulance = False
+        agent.ambulance_cooldown = 0
+        agent.action_points = 4
+        self.log(
+            "respawn",
+            agent=agent,
+            pos=agent.pos,
+            spawn=agent.spawn_pos,
+        )
+        return True
 
     def _smoke_spawn_step(self) -> None:
         x = self.random.randrange(self.width)
@@ -327,6 +382,7 @@ class GameModel(Model):
                 self._step_state.pop(0)
                 self._smoke_spawn_step()
                 self._kill_victims_in_fire()
+                self._knockdown_agents_on_fire()
                 self._spawn_unknowns_to_maintain_three()
                 continue
 

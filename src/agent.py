@@ -12,11 +12,17 @@ if TYPE_CHECKING:
 
 
 class Player(Agent):
-    def __init__(self, model: GameModel, pos: Coord):
+    def __init__(self, model: GameModel, pos: Coord, spawn_pos: Coord | None = None):
         super().__init__(model)
 
         self.model: GameModel = self.model
-        self.pos: Coord = pos
+        self.pos: Coord | None = pos
+        # Initial EXIT cell. Used as respawn point after ambulance.
+        self.spawn_pos: Coord = spawn_pos if spawn_pos is not None else pos
+        # Ambulance state: agent is off the coords grid (pos is None).
+        self.in_ambulance: bool = False
+        # Personal turns to skip while in ambulance ("miss one agent turn").
+        self.ambulance_cooldown: int = 0
         self.victims_rescued = 0
         self.visited = 0
         self.action_points = 4
@@ -36,9 +42,47 @@ class Player(Agent):
             carrying=self.has_victim,
         )
 
+        # Ambulance handling: agent is off the grid (pos is None).
+        if self.in_ambulance:
+            if self.ambulance_cooldown > 0:
+                self.ambulance_cooldown -= 1
+                self.model.log(
+                    "ambulance_hold",
+                    agent=self,
+                    cooldown=self.ambulance_cooldown,
+                )
+                self._reset_action_points()
+                return
+            if not self.model._try_respawn(self):
+                self.model.log(
+                    "respawn_wait",
+                    agent=self,
+                    spawn=self.spawn_pos,
+                )
+                self._reset_action_points()
+                return
+            # Respawned: fall through and act this turn.
+            self.model.log(
+                "agent_turn",
+                agent=self,
+                ap=self.action_points,
+                pos=self.pos,
+                carrying=self.has_victim,
+            )
+
+        # Fire-touch trigger: standing on a FIRE cell at turn start.
+        if self.pos is not None and self.model.get_cell_name(*self.pos) == CellName.FIRE:
+            self.model._send_to_ambulance(self)
+            return
+
+        if self.pos is None or self.in_ambulance:
+            return
+
         yield from self._discover_once()
 
         while self.action_points > 0:
+            if self.pos is None or self.in_ambulance:
+                break
             yield from self._discover_once()
 
             x, y = self.pos
@@ -116,6 +160,8 @@ class Player(Agent):
         self._reset_action_points()
 
     def _discover_once(self) -> Iterator[None]:
+        if self.pos is None or self.in_ambulance:
+            return
         x, y = self.pos
         cdata = self.model.get_cell_name(x, y)
         if cdata == CellName.UNKNOWN:
@@ -143,6 +189,8 @@ class Player(Agent):
         self.action_points = 4
 
     def _nearest(self, name: CellName) -> Coord | None:
+        if self.pos is None or self.in_ambulance:
+            return None
         cells = self.model.get_cells_by_name(name)
         if not cells:
             return None
@@ -153,6 +201,8 @@ class Player(Agent):
         return self._nearest(CellName.EXIT)
 
     def _path_to(self, target: Coord) -> list[tuple[Coord, Action]] | None:
+        if self.pos is None or self.in_ambulance:
+            return None
         return dijkstra(
             self.model,
             self.pos,

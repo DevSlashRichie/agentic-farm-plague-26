@@ -37,7 +37,8 @@ def _c(code: str, text: str) -> str:
 
 
 def _agent(agent) -> str:
-    return _c(_DIM, f"#{agent.unique_id}@{tuple(agent.pos)}")
+    pos = tuple(agent.pos) if agent.pos is not None else "AMBULANCE"
+    return _c(_DIM, f"#{agent.unique_id}@{pos}")
 
 
 def _action_color(action: Action) -> str:
@@ -135,6 +136,23 @@ def _f_collapse(p: dict) -> str:
     return _c(_BOLD + _RED, f"  ✖ COLLAPSE! structural damage={p['total']} (>= 24)")
 
 
+def _f_knockdown(p: dict) -> str:
+    extra = " (carrying victim lost!)" if p.get("had_victim") else ""
+    return _c(_BOLD + _RED, f"  🚑 KNOCKDOWN {_agent(p['agent'])} fire@{p['pos']} → ambulance{extra}")
+
+
+def _f_respawn(p: dict) -> str:
+    return _c(_BOLD + _GREEN, f"  🚑 RESPAWN {_agent(p['agent'])} → {p['pos']}")
+
+
+def _f_ambulance_hold(p: dict) -> str:
+    return _c(_GREY, f"    ↳ in ambulance ({_agent(p['agent'])}, cooldown={p.get('cooldown', 0)})")
+
+
+def _f_respawn_wait(p: dict) -> str:
+    return _c(_YELLOW, f"    ↳ respawn blocked, spawn {p.get('spawn')} on fire ({_agent(p['agent'])})")
+
+
 FORMATTERS: dict[str, Callable[[dict], str]] = {
     "step_begin": _f_step_begin,
     "step_end": _f_step_end,
@@ -153,6 +171,10 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "explode": _f_explode,
     "structural_damage": _f_structural_damage,
     "collapse": _f_collapse,
+    "knockdown": _f_knockdown,
+    "respawn": _f_respawn,
+    "ambulance_hold": _f_ambulance_hold,
+    "respawn_wait": _f_respawn_wait,
 }
 
 
@@ -175,7 +197,13 @@ def map_to_json(map_data: dict) -> dict:
 
 def agents_to_json(agents) -> list[dict]:
     return [
-        {"id": a.unique_id, "pos": list(a.pos), "carrying": a.has_victim}
+        {
+            "id": a.unique_id,
+            "pos": list(a.pos) if a.pos is not None else None,
+            "carrying": a.has_victim,
+            "in_ambulance": a.in_ambulance,
+            "spawn": list(a.spawn_pos),
+        }
         for a in agents
     ]
 
@@ -198,7 +226,7 @@ class JsonCollector:
         self._current_events: list[dict] = []
         self._current_step: int | None = None
         self._explode_buffer: dict[tuple[int, int], list[list[int]]] = {}
-        self._agent_positions: dict[int, tuple[int, int]] = {}
+        self._agent_positions: dict[int, tuple[int, int] | None] = {}
         for a in agents:
             self._agent_positions[a.unique_id] = a.pos
 
@@ -244,6 +272,22 @@ class JsonCollector:
             return self._transform_rescue(payload)
         if kind == "kill":
             return self._transform_kill(payload)
+        if kind == "knockdown":
+            return self._transform_knockdown(payload)
+        if kind == "respawn":
+            return self._transform_respawn(payload)
+        if kind == "ambulance_hold":
+            return {
+                "type": "ambulance_hold",
+                "agent": payload["agent"].unique_id,
+                "cooldown": payload.get("cooldown", 0),
+            }
+        if kind == "respawn_wait":
+            return {
+                "type": "respawn_wait",
+                "agent": payload["agent"].unique_id,
+                "spawn": list(payload["spawn"]),
+            }
         if kind == "structural_damage":
             return self._transform_structural_damage(payload)
         if kind == "collapse":
@@ -261,7 +305,7 @@ class JsonCollector:
             return {
                 "type": "move",
                 "agent": agent_id,
-                "from": list(prev),
+                "from": list(prev) if prev is not None else None,
                 "to": list(coord),
                 "ap_remaining": p["agent"].action_points,
             }
@@ -279,18 +323,20 @@ class JsonCollector:
                 },
             ]
         if action == Action.OPEN_DOOR:
+            from_pos = p["agent"].pos
             return {
                 "type": "door_open",
                 "agent": agent_id,
-                "from": list(p["agent"].pos),
+                "from": list(from_pos) if from_pos is not None else None,
                 "to": list(coord),
                 "ap_remaining": p["agent"].action_points,
             }
         if action == Action.CHOP_WALL:
+            from_pos = p["agent"].pos
             return {
                 "type": "wall_chop",
                 "agent": agent_id,
-                "from": list(p["agent"].pos),
+                "from": list(from_pos) if from_pos is not None else None,
                 "to": list(coord),
                 "damage": 2,
                 "ap_remaining": p["agent"].action_points,
@@ -369,12 +415,39 @@ class JsonCollector:
 
     def _transform_kill(self, p: dict) -> list[dict]:
         pos: tuple[int, int] = p["pos"]
+        # Carried victim lost in knockdown: no board cell changes to fire.
+        if p.get("carried"):
+            event: dict = {"type": "kill", "pos": list(pos), "total": p["total"], "carried": True}
+            if p.get("agent") is not None:
+                event["agent"] = p["agent"].unique_id
+            return [event]
         key = _cell_key(pos)
         self._cell_states[key] = "fire"
         return [
             {"type": "cell_change", "pos": list(pos), "from": "victim", "to": "fire"},
             {"type": "kill", "pos": list(pos), "total": p["total"]},
         ]
+
+    def _transform_knockdown(self, p: dict) -> dict:
+        agent_id: int = p["agent"].unique_id
+        self._agent_positions[agent_id] = None  # type: ignore[assignment]
+        return {
+            "type": "knockdown",
+            "agent": agent_id,
+            "pos": list(p["pos"]) if p["pos"] is not None else None,
+            "spawn": list(p["spawn"]),
+            "had_victim": bool(p.get("had_victim", False)),
+        }
+
+    def _transform_respawn(self, p: dict) -> dict:
+        agent_id: int = p["agent"].unique_id
+        self._agent_positions[agent_id] = tuple(p["pos"])  # type: ignore[assignment]
+        return {
+            "type": "respawn",
+            "agent": agent_id,
+            "pos": list(p["pos"]),
+            "spawn": list(p.get("spawn", p["pos"])),
+        }
 
     def _transform_structural_damage(self, p: dict) -> dict:
         event: dict = {
