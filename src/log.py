@@ -5,7 +5,7 @@ import os
 from collections.abc import Callable
 
 from src.agent import Player
-from src.domain import Action, CellName
+from src.domain import CHOP_DAMAGE, Action, CellName
 
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"
@@ -132,6 +132,10 @@ def _f_structural_damage(p: dict) -> str:
     )
 
 
+def _f_poi_reshuffle(p: dict) -> str:
+    return _c(_CYAN, f"  ◇ POI deck reshuffled ({p['reals']} real + {p['empties']} empty)")
+
+
 def _f_collapse(p: dict) -> str:
     return _c(_BOLD + _RED, f"  ✖ COLLAPSE! structural damage={p['total']} (>= 24)")
 
@@ -170,6 +174,7 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "smoke_spawn": _f_smoke_spawn,
     "explode": _f_explode,
     "structural_damage": _f_structural_damage,
+    "poi_reshuffle": _f_poi_reshuffle,
     "collapse": _f_collapse,
     "knockdown": _f_knockdown,
     "respawn": _f_respawn,
@@ -290,6 +295,13 @@ class JsonCollector:
             }
         if kind == "structural_damage":
             return self._transform_structural_damage(payload)
+        if kind == "poi_reshuffle":
+            return {
+                "type": "poi_reshuffle",
+                "reals": payload["reals"],
+                "empties": payload["empties"],
+                "size": payload["size"],
+            }
         if kind == "collapse":
             return {"type": "collapse", "total": payload["total"]}
         return None
@@ -338,7 +350,7 @@ class JsonCollector:
                 "agent": agent_id,
                 "from": list(from_pos) if from_pos is not None else None,
                 "to": list(coord),
-                "damage": 2,
+                "damage": CHOP_DAMAGE,
                 "ap_remaining": p["agent"].action_points,
             }
         return {

@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Iterator
 
 from mesa import Agent
 
-from src.domain import Action, CellName, Coord
+from src.domain import CHOP_DAMAGE, Action, CellName, Coord
 from src.utils import _action_cost, _edge, dijkstra, manhattan
 
 if TYPE_CHECKING:
@@ -88,6 +88,23 @@ class Player(Agent):
             x, y = self.pos
             cdata = self.model.get_cell_name(x, y)
 
+            # Burn rule: 2+ FIRE/SMOKE cells at/around the agent get turned
+            # off before smoke converts and fire spreads. Fires first.
+            # One per pass, standard extinguish cost; recounts next pass
+            # until fewer than 2 remain.
+            ecost = _action_cost(Action.EXTINGUISH, self.has_victim)
+            if self.action_points >= ecost:
+                burn = self._nearby_burn(x, y)
+                if len(burn) >= 2:
+                    cell = burn[0]
+                    self.model.set_cell_name(cell[0], cell[1], CellName.NONE)
+                    self.action_points -= ecost
+                    self.model.emit_action(self, Action.EXTINGUISH, cell, ecost)
+                    did_act = True
+                    yield
+                    yield from self._discover_once()
+                    continue
+
             if self.has_victim:
                 target = self._find_exit()
             else:
@@ -136,7 +153,7 @@ class Player(Agent):
                 if edge in self.model.walls:
                     self.model.walls.discard(edge)
                     self.model.add_structural_damage(
-                        2,
+                        CHOP_DAMAGE,
                         reason="chop",
                         pos=action_target,
                         edge=edge,
@@ -196,6 +213,23 @@ class Player(Agent):
             return None
         nearest = min(cells, key=lambda c: manhattan((c["x"], c["y"]), self.pos))
         return (nearest["x"], nearest["y"])
+
+    def _nearby_burn(self, x: int, y: int) -> list[Coord]:
+        """FIRE/SMOKE cells on the agent's own cell plus orthogonal neighbors.
+
+        Fires come first so the more dangerous cells are cleared first.
+        """
+        fires: list[Coord] = []
+        smokes: list[Coord] = []
+        for nx, ny in ((x, y), (x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+            if not (0 <= nx < self.model.width and 0 <= ny < self.model.height):
+                continue
+            name = self.model.get_cell_name(nx, ny)
+            if name == CellName.FIRE:
+                fires.append((nx, ny))
+            elif name == CellName.SMOKE:
+                smokes.append((nx, ny))
+        return fires + smokes
 
     def _find_exit(self) -> Coord | None:
         return self._nearest(CellName.EXIT)

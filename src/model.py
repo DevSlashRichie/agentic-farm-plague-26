@@ -7,7 +7,7 @@ from mesa import DataCollector, Model
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 
 from src.agent import Player
-from src.domain import CellName, Coord, MapData
+from src.domain import POI_DECK_EMPTIES, POI_DECK_REALS, CellName, Coord, MapData
 from src.maps import default_map
 
 if TYPE_CHECKING:
@@ -32,6 +32,14 @@ class GameModel(Model):
         self.victims_rescued = 0
         self.structural_damage = 0
 
+        self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
+        self._log_subscribers: list[Callable[[str, dict], None]] = []
+
+        # POI deck (covers the initial POIs too): shuffled at game start,
+        # reshuffled when exhausted; every new POI pops one marker off it.
+        self._poi_deck: list[CellName] = []
+        self._reshuffle_poi_deck()
+
         self.max_steps = max_steps
         self._load_map(map_data)
         self._spawn_agents(agents)
@@ -45,8 +53,6 @@ class GameModel(Model):
             },
         )
 
-        self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
-        self._log_subscribers: list[Callable[[str, dict], None]] = []
         self._step_state: list[tuple[Player, Iterator[None]]] | None = None
         self._in_user_step: bool = False
 
@@ -68,6 +74,23 @@ class GameModel(Model):
 
     def _edge(self, a: Coord, b: Coord) -> tuple[Coord, Coord]:
         return (a, b) if a < b else (b, a)
+
+    def _reshuffle_poi_deck(self) -> None:
+        self._poi_deck = (
+            [CellName.VICTIM] * POI_DECK_REALS + [CellName.FAKE] * POI_DECK_EMPTIES
+        )
+        self.random.shuffle(self._poi_deck)
+        self.log(
+            "poi_reshuffle",
+            reals=POI_DECK_REALS,
+            empties=POI_DECK_EMPTIES,
+            size=len(self._poi_deck),
+        )
+
+    def _draw_poi(self) -> CellName:
+        if not self._poi_deck:
+            self._reshuffle_poi_deck()
+        return self._poi_deck.pop()
 
     def _load_map(self, map_data: MapData):
         self.width = map_data["columns"]
@@ -97,7 +120,7 @@ class GameModel(Model):
                 name = CellName(cell_name)
                 cell.cell_type = tv[name]
                 if name == CellName.UNKNOWN:
-                    cell.hidden_type = tv[CellName.VICTIM]
+                    cell.hidden_type = tv[self._draw_poi()]
 
         self.walls: set[tuple[Coord, Coord]] = set()
         for a, b in map_data["walls"]:
@@ -173,7 +196,7 @@ class GameModel(Model):
         sample = self.random.sample(candidates, n)
         for cell_data in sample:
             x, y = cell_data["x"], cell_data["y"]
-            kind = CellName.VICTIM if self.random.random() < 0.5 else CellName.FAKE
+            kind = self._draw_poi()
             self.set_cell_name(x, y, CellName.UNKNOWN)
             self.set_hidden(x, y, kind)
             self.log("spawn", cell=(x, y), hidden_kind=kind.value)

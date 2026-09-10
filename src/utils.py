@@ -3,7 +3,7 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING, Optional, TypedDict
 
-from src.domain import Action, CellName, Coord
+from src.domain import CHOP_AP_COST, Action, CellName, Coord
 
 if TYPE_CHECKING:
     from src.agent import Player
@@ -99,8 +99,8 @@ def _action_cost(action: Action, carrying: bool) -> int:
         return 2 if carrying else 1
     return {
         Action.OPEN_DOOR: 1,
-        Action.CHOP_WALL: 4,
-        Action.EXTINGUISH: 2,
+        Action.CHOP_WALL: CHOP_AP_COST,
+        Action.EXTINGUISH: 1,
     }.get(action, 1)
 
 

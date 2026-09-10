@@ -93,6 +93,8 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_RED, f"  💥 explode → fire @ {_payload['cell']} (origin {_payload['origin']})"))
     elif kind == "structural_damage":
         print(_c(_YELLOW, f"  ▓ STRUCTURAL +{_payload['amount']} ({_payload['reason']}) total={_payload['total']}"))
+    elif kind == "poi_reshuffle":
+        print(_c(_CYAN, f"  ◇ POI deck reshuffled ({_payload['reals']} real + {_payload['empties']} empty)"))
     elif kind == "collapse":
         print(_c(_RED, f"  ✖ COLLAPSE! damage={_payload['total']} (>= 24)"))
     elif kind == "knockdown":
