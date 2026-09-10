@@ -93,6 +93,14 @@ def quiet_log(kind: str, _payload: dict) -> None:
         print(_c(_RED, f"  💥 explode → fire @ {_payload['cell']} (origin {_payload['origin']})"))
     elif kind == "structural_damage":
         print(_c(_YELLOW, f"  ▓ STRUCTURAL +{_payload['amount']} ({_payload['reason']}) total={_payload['total']}"))
+    elif kind == "wall_damaged":
+        a, b = _payload["edge"]
+        print(_c(_YELLOW, f"  ▓ wall damaged {list(a)}↔{list(b)} (hp={_payload['hp']})"))
+    elif kind == "wall_destroyed":
+        a, b = _payload["edge"]
+        print(_c(_RED, f"  ▓ WALL DESTROYED {list(a)}↔{list(b)}"))
+    elif kind == "poi_reshuffle":
+        print(_c(_CYAN, f"  ◇ POI deck reshuffled ({_payload['reals']} real + {_payload['empties']} empty)"))
     elif kind == "collapse":
         print(_c(_RED, f"  ✖ COLLAPSE! damage={_payload['total']} (>= 24)"))
     elif kind == "knockdown":
@@ -116,6 +124,7 @@ CELL_STYLE: dict[CellName, dict] = {
 }
 
 WALL_COLOR = "#2C2C2C"
+WALL_DAMAGED_COLOR = "#E67E22"
 DOOR_CLOSED_COLOR = "#8B5A2B"
 DOOR_OPEN_COLOR = "#D4B896"
 EDGE_LINEWIDTH = 4
@@ -243,9 +252,23 @@ def _refresh_edges(
     doors: dict[tuple[Coord, Coord], bool],
     wall_lines: dict[tuple[Coord, Coord], Line2D],
     door_lines: dict[tuple[Coord, Coord], Line2D],
+    wall_hp: dict[tuple[Coord, Coord], int] | None = None,
+    wall_max_hp: int = 2,
 ) -> None:
+    wall_hp = wall_hp or {}
     for edge, line in wall_lines.items():
-        line.set_visible(edge in walls)
+        if edge not in walls:
+            line.set_visible(False)
+            continue
+        line.set_visible(True)
+        if wall_hp.get(edge, wall_max_hp) < wall_max_hp:
+            line.set_color(WALL_DAMAGED_COLOR)
+            line.set_linewidth(OPEN_LINEWIDTH)
+            line.set_alpha(1.0)
+        else:
+            line.set_color(WALL_COLOR)
+            line.set_linewidth(EDGE_LINEWIDTH)
+            line.set_alpha(1.0)
 
     for edge, line in door_lines.items():
         if edge not in doors:
@@ -273,6 +296,7 @@ def _legend_handles():
         Patch(facecolor=agent_color(0), edgecolor="white", linewidth=2.5, label="carrying victim")
     )
     handles.append(Patch(facecolor=WALL_COLOR, edgecolor="#1A1A1A", label="wall"))
+    handles.append(Patch(facecolor=WALL_DAMAGED_COLOR, edgecolor="#1A1A1A", label="wall (damaged)"))
     handles.append(Patch(facecolor=DOOR_CLOSED_COLOR, edgecolor="#1A1A1A", label="door (closed)"))
     handles.append(Patch(facecolor=DOOR_OPEN_COLOR, edgecolor="#1A1A1A", label="door (open)"))
     return handles
@@ -398,6 +422,7 @@ def animate_simulation(
                 for x in range(width)
             ],
             "walls": set(model.walls),
+            "wall_hp": dict(model.wall_hp),
             "doors": dict(model.doors),
             "agents": [
                 (
@@ -417,7 +442,7 @@ def animate_simulation(
     def apply() -> list:
         snap = capture()
         _apply_grid(tiles, glyphs, snap["grid"], width, height)
-        _refresh_edges(snap["walls"], snap["doors"], wall_lines, door_lines)
+        _refresh_edges(snap["walls"], snap["doors"], wall_lines, door_lines, snap["wall_hp"])
         agents = snap["agents"]
         visible = [a for a in agents if not a[3] and a[1] is not None]
         for i, marker in enumerate(markers):

@@ -6,8 +6,17 @@ from typing import TYPE_CHECKING
 from mesa import DataCollector, Model
 from mesa.discrete_space import OrthogonalVonNeumannGrid
 
+from src.utils import _edge, get_neighbors
+
 from src.agent import Player
-from src.domain import CellName, Coord, MapData
+from src.domain import (
+    POI_DECK_EMPTIES,
+    POI_DECK_REALS,
+    WALL_MAX_HP,
+    CellName,
+    Coord,
+    MapData,
+)
 from src.maps import default_map
 
 if TYPE_CHECKING:
@@ -32,6 +41,12 @@ class GameModel(Model):
         self.victims_rescued = 0
         self.structural_damage = 0
 
+        self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
+        self._log_subscribers: list[Callable[[str, dict], None]] = []
+
+        self._poi_deck: list[CellName] = []
+        self._reshuffle_poi_deck()
+
         self.max_steps = max_steps
         self._load_map(map_data)
         self._spawn_agents(agents)
@@ -45,8 +60,6 @@ class GameModel(Model):
             },
         )
 
-        self._on_action: list[Callable[[Player, Action, Coord, int], None]] = []
-        self._log_subscribers: list[Callable[[str, dict], None]] = []
         self._step_state: list[tuple[Player, Iterator[None]]] | None = None
         self._in_user_step: bool = False
 
@@ -68,6 +81,23 @@ class GameModel(Model):
 
     def _edge(self, a: Coord, b: Coord) -> tuple[Coord, Coord]:
         return (a, b) if a < b else (b, a)
+
+    def _reshuffle_poi_deck(self) -> None:
+        self._poi_deck = (
+            [CellName.VICTIM] * POI_DECK_REALS + [CellName.FAKE] * POI_DECK_EMPTIES
+        )
+        self.random.shuffle(self._poi_deck)
+        self.log(
+            "poi_reshuffle",
+            reals=POI_DECK_REALS,
+            empties=POI_DECK_EMPTIES,
+            size=len(self._poi_deck),
+        )
+
+    def _draw_poi(self) -> CellName:
+        if not self._poi_deck:
+            self._reshuffle_poi_deck()
+        return self._poi_deck.pop()
 
     def _load_map(self, map_data: MapData):
         self.width = map_data["columns"]
@@ -97,11 +127,13 @@ class GameModel(Model):
                 name = CellName(cell_name)
                 cell.cell_type = tv[name]
                 if name == CellName.UNKNOWN:
-                    cell.hidden_type = tv[CellName.VICTIM]
+                    cell.hidden_type = tv[self._draw_poi()]
 
         self.walls: set[tuple[Coord, Coord]] = set()
         for a, b in map_data["walls"]:
             self.walls.add(self._edge(a, b))
+        # HP only tracked once grazed; missing edges are at full health.
+        self.wall_hp: dict[tuple[Coord, Coord], int] = {}
 
         self.doors: dict[tuple[Coord, Coord], bool] = {}
         for a, b in map_data["doors"]:
@@ -173,7 +205,7 @@ class GameModel(Model):
         sample = self.random.sample(candidates, n)
         for cell_data in sample:
             x, y = cell_data["x"], cell_data["y"]
-            kind = CellName.VICTIM if self.random.random() < 0.5 else CellName.FAKE
+            kind = self._draw_poi()
             self.set_cell_name(x, y, CellName.UNKNOWN)
             self.set_hidden(x, y, kind)
             self.log("spawn", cell=(x, y), hidden_kind=kind.value)
@@ -303,21 +335,36 @@ class GameModel(Model):
             became=became.value,
         )
 
-    def _explode_at(self, fx: int, fy: int) -> None:
-        from src.utils import _edge
+    def wall_hp_of(self, edge: tuple[Coord, Coord]) -> int:
+        return self.wall_hp.get(edge, WALL_MAX_HP)
 
-        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+    def _tick_wall(self, edge: tuple[Coord, Coord], pos: Coord) -> None:
+        if edge not in self.walls:
+            return
+        hp = self.wall_hp_of(edge) - 1
+        if hp <= 0:
+            self.walls.discard(edge)
+            self.wall_hp.pop(edge, None)
+            self.log("wall_destroyed", edge=edge, pos=pos)
+            self.add_structural_damage(
+                2,
+                reason="wall_break",
+                pos=pos,
+                edge=edge,
+            )
+            return
+        self.wall_hp[edge] = hp
+        self.log("wall_damaged", edge=edge, pos=pos, hp=hp)
+
+    def _explode_at(self, fx: int, fy: int) -> None:
+        for nbr in get_neighbors((fx, fy), mode="orthogonal", width=self.width, height=self.height):
+            dx, dy = nbr[0] - fx, nbr[1] - fy
             prev = (fx, fy)
             cx, cy = fx + dx, fy + dy
             while 0 <= cx < self.width and 0 <= cy < self.height:
                 cur = (cx, cy)
                 if _edge(prev, cur) in self.walls:
-                    self.add_structural_damage(
-                        1,
-                        reason="explosion",
-                        pos=cur,
-                        edge=_edge(prev, cur),
-                    )
+                    self._tick_wall(_edge(prev, cur), cur)
                     break
                 if self.get_cell_name(cx, cy) == CellName.FIRE:
                     prev = cur

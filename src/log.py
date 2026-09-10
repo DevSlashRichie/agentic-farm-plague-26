@@ -1,11 +1,21 @@
+# Event/log collector design note:
+#
+# The collector architecture here was designed by us. It is inspired by how
+# OTLP works, at least in Rust: the game emits events and you attach a
+# collector depending on the format and target you want (terminal or JSON).
+#
+# The game already needed an internal event system, similar to how
+# EventListener works in Minecraft's Bukkit API, so we reused that same
+# architecture for both outputs. We then asked AI to generate the
+# terminal formatting on top of it, with a nicer visual design for
+# following what is happening during a run.
 from __future__ import annotations
 
 import json
 import os
 from collections.abc import Callable
 
-from src.agent import Player
-from src.domain import Action, CellName
+from src.domain import CHOP_DAMAGE, Action, CellName
 
 _RESET = "\x1b[0m"
 _BOLD = "\x1b[1m"
@@ -132,6 +142,20 @@ def _f_structural_damage(p: dict) -> str:
     )
 
 
+def _f_wall_damaged(p: dict) -> str:
+    a, b = p["edge"]
+    return _c(_YELLOW, f"  ▓ wall damaged {list(a)}↔{list(b)} (hp={p['hp']})")
+
+
+def _f_wall_destroyed(p: dict) -> str:
+    a, b = p["edge"]
+    return _c(_BOLD + _YELLOW, f"  ▓ WALL DESTROYED {list(a)}↔{list(b)}")
+
+
+def _f_poi_reshuffle(p: dict) -> str:
+    return _c(_CYAN, f"  ◇ POI deck reshuffled ({p['reals']} real + {p['empties']} empty)")
+
+
 def _f_collapse(p: dict) -> str:
     return _c(_BOLD + _RED, f"  ✖ COLLAPSE! structural damage={p['total']} (>= 24)")
 
@@ -170,6 +194,9 @@ FORMATTERS: dict[str, Callable[[dict], str]] = {
     "smoke_spawn": _f_smoke_spawn,
     "explode": _f_explode,
     "structural_damage": _f_structural_damage,
+    "wall_damaged": _f_wall_damaged,
+    "wall_destroyed": _f_wall_destroyed,
+    "poi_reshuffle": _f_poi_reshuffle,
     "collapse": _f_collapse,
     "knockdown": _f_knockdown,
     "respawn": _f_respawn,
@@ -290,6 +317,26 @@ class JsonCollector:
             }
         if kind == "structural_damage":
             return self._transform_structural_damage(payload)
+        if kind == "wall_damaged":
+            a, b = payload["edge"]
+            return {
+                "type": "wall_damaged",
+                "edge": [list(a), list(b)],
+                "hp": payload["hp"],
+            }
+        if kind == "wall_destroyed":
+            a, b = payload["edge"]
+            return {
+                "type": "wall_destroyed",
+                "edge": [list(a), list(b)],
+            }
+        if kind == "poi_reshuffle":
+            return {
+                "type": "poi_reshuffle",
+                "reals": payload["reals"],
+                "empties": payload["empties"],
+                "size": payload["size"],
+            }
         if kind == "collapse":
             return {"type": "collapse", "total": payload["total"]}
         return None
@@ -338,7 +385,7 @@ class JsonCollector:
                 "agent": agent_id,
                 "from": list(from_pos) if from_pos is not None else None,
                 "to": list(coord),
-                "damage": 2,
+                "damage": CHOP_DAMAGE,
                 "ap_remaining": p["agent"].action_points,
             }
         return {

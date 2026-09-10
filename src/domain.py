@@ -21,6 +21,18 @@ class Action(StrEnum):
     CHOP_WALL = "chop_wall"
 
 
+CHOP_AP_COST = 6
+CHOP_DAMAGE = 2
+
+FIRE_EXTINGUISH_COST = 2
+SMOKE_EXTINGUISH_COST = 1
+
+POI_DECK_REALS = 12
+POI_DECK_EMPTIES = 6
+
+WALL_MAX_HP = 2
+
+
 class MapData(TypedDict):
     rows: int
     columns: int

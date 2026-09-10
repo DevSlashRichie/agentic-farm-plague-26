@@ -3,7 +3,14 @@ from __future__ import annotations
 import heapq
 from typing import TYPE_CHECKING, Optional, TypedDict
 
-from src.domain import Action, CellName, Coord
+from src.domain import (
+    CHOP_AP_COST,
+    FIRE_EXTINGUISH_COST,
+    SMOKE_EXTINGUISH_COST,
+    Action,
+    CellName,
+    Coord,
+)
 
 if TYPE_CHECKING:
     from src.agent import Player
@@ -18,6 +25,34 @@ class ActionOption(TypedDict):
 
 def manhattan(a: Coord, b: Coord) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+_ORTHOGONAL_OFFSETS = ((-1, 0), (1, 0), (0, -1), (0, 1))
+_DIAGONAL_OFFSETS = ((-1, -1), (-1, 1), (1, -1), (1, 1))
+_MOORE_OFFSETS = _ORTHOGONAL_OFFSETS + _DIAGONAL_OFFSETS
+
+_OFFSETS_BY_MODE = {
+    "orthogonal": _ORTHOGONAL_OFFSETS,
+    "diagonal": _DIAGONAL_OFFSETS,
+    "moore": _MOORE_OFFSETS,
+}
+
+
+def get_neighbors(
+    pos: Coord,
+    mode: str = "orthogonal",
+    width: int | None = None,
+    height: int | None = None,
+) -> list[Coord]:
+    try:
+        offsets = _OFFSETS_BY_MODE[mode]
+    except KeyError:
+        raise ValueError(f"unknown mode={mode!r}, expected one of {sorted(_OFFSETS_BY_MODE)}")
+    x, y = pos
+    cells = [(x + dx, y + dy) for dx, dy in offsets]
+    if width is not None and height is not None:
+        cells = [c for c in cells if 0 <= c[0] < width and 0 <= c[1] < height]
+    return cells
 
 
 def _edge(a: Coord, b: Coord) -> tuple[Coord, Coord]:
@@ -80,8 +115,7 @@ def valid_actions(
     carrying_victim = agent.has_victim
 
     if to_pos is None:
-        fx, fy = from_pos
-        targets = [(fx + dx, fy + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
+        targets = get_neighbors(from_pos, mode="orthogonal")
     else:
         targets = [to_pos]
 
@@ -99,9 +133,16 @@ def _action_cost(action: Action, carrying: bool) -> int:
         return 2 if carrying else 1
     return {
         Action.OPEN_DOOR: 1,
-        Action.CHOP_WALL: 4,
-        Action.EXTINGUISH: 2,
+        Action.CHOP_WALL: CHOP_AP_COST,
+        Action.EXTINGUISH: 1,
     }.get(action, 1)
+
+
+def _extinguish_cost(model: GameModel, coord: Coord) -> int:
+    """AP cost to extinguish a cell by what is actually on it."""
+    if model.get_cell_name(*coord) == CellName.FIRE:
+        return FIRE_EXTINGUISH_COST
+    return SMOKE_EXTINGUISH_COST
 
 
 def _edge_actions(model: GameModel, c: Coord, neighbor: Coord, carrying: bool) -> list[Action]:
@@ -130,16 +171,14 @@ def dijkstra(
     width = model.width
     height = model.height
 
-    def in_bounds(c: Coord) -> bool:
-        x, y = c
-        return 0 <= x < width and 0 <= y < height
-
-    def neighbors_of(c: Coord) -> list[Coord]:
-        x, y = c
-        return [(x + dx, y + dy) for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1))]
-
     def edge_cost_total(c: Coord, neighbor: Coord) -> int:
-        return sum(_action_cost(a, carrying) for a in _edge_actions(model, c, neighbor, carrying))
+        total = 0
+        for a in _edge_actions(model, c, neighbor, carrying):
+            if a == Action.EXTINGUISH:
+                total += _extinguish_cost(model, neighbor)
+            else:
+                total += _action_cost(a, carrying)
+        return total
 
     counter = 0
     open_set: list[tuple[int, int, Coord]] = []
@@ -173,9 +212,7 @@ def dijkstra(
             continue
         closed.add(current)
 
-        for neighbor in neighbors_of(current):
-            if not in_bounds(neighbor):
-                continue
+        for neighbor in get_neighbors(current, mode="orthogonal", width=width, height=height):
             tentative_g = g_score[current] + edge_cost_total(current, neighbor)
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current

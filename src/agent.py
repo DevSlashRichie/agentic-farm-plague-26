@@ -4,8 +4,16 @@ from typing import TYPE_CHECKING, Iterator
 
 from mesa import Agent
 
-from src.domain import Action, CellName, Coord
-from src.utils import _action_cost, _edge, dijkstra, manhattan
+from src.domain import CHOP_DAMAGE, Action, CellName, Coord
+from src.utils import (
+    _action_cost,
+    _edge,
+    _edge_blocked,
+    _extinguish_cost,
+    dijkstra,
+    get_neighbors,
+    manhattan,
+)
 
 if TYPE_CHECKING:
     from src.model import GameModel
@@ -17,11 +25,8 @@ class Player(Agent):
 
         self.model: GameModel = self.model
         self.pos: Coord | None = pos
-        # Initial EXIT cell. Used as respawn point after ambulance.
         self.spawn_pos: Coord = spawn_pos if spawn_pos is not None else pos
-        # Ambulance state: agent is off the coords grid (pos is None).
         self.in_ambulance: bool = False
-        # Personal turns to skip while in ambulance ("miss one agent turn").
         self.ambulance_cooldown: int = 0
         self.victims_rescued = 0
         self.visited = 0
@@ -42,7 +47,6 @@ class Player(Agent):
             carrying=self.has_victim,
         )
 
-        # Ambulance handling: agent is off the grid (pos is None).
         if self.in_ambulance:
             if self.ambulance_cooldown > 0:
                 self.ambulance_cooldown -= 1
@@ -88,6 +92,23 @@ class Player(Agent):
             x, y = self.pos
             cdata = self.model.get_cell_name(x, y)
 
+            # if too much FIRE + SMOKE then we turn those off.
+            burn = self._nearby_burn(x, y)
+            if len(burn) >= 2:
+                cell = next(
+                    (c for c in burn if self.action_points >= _extinguish_cost(self.model, c)),
+                    None,
+                )
+                if cell is not None:
+                    ecost = _extinguish_cost(self.model, cell)
+                    self.model.set_cell_name(cell[0], cell[1], CellName.NONE)
+                    self.action_points -= ecost
+                    self.model.emit_action(self, Action.EXTINGUISH, cell, ecost)
+                    did_act = True
+                    yield
+                    yield from self._discover_once()
+                    continue
+
             if self.has_victim:
                 target = self._find_exit()
             else:
@@ -123,7 +144,10 @@ class Player(Agent):
             )
 
             action_target, action = path[0]
-            cost = _action_cost(action, self.has_victim)
+            if action == Action.EXTINGUISH:
+                cost = _extinguish_cost(self.model, action_target)
+            else:
+                cost = _action_cost(action, self.has_victim)
 
             if action == Action.MOVE:
                 self.pos = action_target
@@ -136,7 +160,7 @@ class Player(Agent):
                 if edge in self.model.walls:
                     self.model.walls.discard(edge)
                     self.model.add_structural_damage(
-                        2,
+                        CHOP_DAMAGE,
                         reason="chop",
                         pos=action_target,
                         edge=edge,
@@ -196,6 +220,42 @@ class Player(Agent):
             return None
         nearest = min(cells, key=lambda c: manhattan((c["x"], c["y"]), self.pos))
         return (nearest["x"], nearest["y"])
+
+    def _nearby_burn(self, x: int, y: int) -> list[Coord]:
+        """Reachable FIRE/SMOKE cells on the agent's cell plus 8 neighbors.
+
+        Walls and closed doors block reach: orthogonal cells need their
+        shared edge open; diagonals need either corner path open. Fires
+        come first so the more dangerous cells are cleared first.
+        """
+        if self.pos is None:
+            return []
+        here: Coord = (x, y)
+        fires: list[Coord] = []
+        smokes: list[Coord] = []
+
+        def _collect(cell: Coord) -> None:
+            name = self.model.get_cell_name(*cell)
+            if name == CellName.FIRE:
+                fires.append(cell)
+            elif name == CellName.SMOKE:
+                smokes.append(cell)
+
+        _collect(here)
+        for nbr in get_neighbors(here, mode="orthogonal", width=self.model.width, height=self.model.height):
+            if _edge_blocked(self.model, here, nbr):
+                continue
+            _collect(nbr)
+        for nbr in get_neighbors(here, mode="diagonal", width=self.model.width, height=self.model.height):
+            dx, dy = nbr[0] - x, nbr[1] - y
+            via_x = (x + dx, y)
+            via_y = (x, y + dy)
+            if _edge_blocked(self.model, here, via_x) and _edge_blocked(
+                self.model, here, via_y
+            ):
+                continue
+            _collect(nbr)
+        return fires + smokes
 
     def _find_exit(self) -> Coord | None:
         return self._nearest(CellName.EXIT)
