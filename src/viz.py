@@ -513,10 +513,11 @@ if __name__ == "__main__":
     parser.add_argument("--animate", action="store_true", help="Animate the simulation")
     parser.add_argument("--interval-ms", type=int, default=250, help="ms per frame (animate)")
     parser.add_argument("--save", type=str, default=None, help="Save output to path")
+    parser.add_argument("--seed", type=int, default=None, help="RNG seed for the simulation")
     args = parser.parse_args()
 
     if args.animate:
-        model = GameModel()
+        model = GameModel(seed=args.seed)
         animate_simulation(model, interval_ms=args.interval_ms, show=True, save_path=args.save)
     else:
         render_map(show=True, save_path=args.save)

@@ -19,6 +19,12 @@ def main() -> None:
         action="store_true",
         help="Serve a new simulation as JSON on http://0.0.0.0:8000/.",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="RNG seed for the simulation (direct run only; server mode uses per-request /?seed=42).",
+    )
     args = parser.parse_args()
 
     if args.server:
@@ -28,7 +34,7 @@ def main() -> None:
         return
 
     map_data = default_map()
-    model = GameModel(map_data=map_data)
+    model = GameModel(map_data=map_data, seed=args.seed)
     if args.json:
         collector = JsonCollector(map_data, model.agents)
         model._log_subscribers.append(collector)

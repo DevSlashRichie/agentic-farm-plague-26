@@ -3,6 +3,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import logging
+from urllib.parse import parse_qs, urlparse
 
 from src.log import JsonCollector
 from src.maps import default_map
@@ -12,9 +13,22 @@ from src.model import GameModel
 logger = logging.getLogger(__name__)
 
 
-def run_simulation() -> dict:
+def parse_seed(raw: str | None) -> float | int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        raise ValueError(f"invalid seed: {raw!r}")
+
+
+def run_simulation(seed: float | int | None = None) -> dict:
     map_data = default_map()
-    model = GameModel(map_data=map_data)
+    model = GameModel(map_data=map_data, seed=seed)
     collector = JsonCollector(map_data, model.agents)
     model._log_subscribers.append(collector)
 
@@ -33,12 +47,21 @@ def run_simulation() -> dict:
 
 class SimulationRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path != "/":
+        parsed = urlparse(self.path)
+        if parsed.path != "/":
             self._send_json(404, {"error": "not found"})
             return
 
+        query = parse_qs(parsed.query)
+        raw_seed = query.get("seed", [None])[0]
         try:
-            self._send_json(200, run_simulation())
+            seed = parse_seed(raw_seed)
+        except ValueError:
+            self._send_json(400, {"error": f"invalid seed: {raw_seed!r}"})
+            return
+
+        try:
+            self._send_json(200, run_simulation(seed=seed))
         except Exception:
             logger.exception("Simulation request failed")
             self._send_json(500, {"error": "simulation failed"})
@@ -68,4 +91,10 @@ def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
 
 
 if __name__ == "__main__":
-    serve()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Flashpoint simulation server")
+    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--port", type=int, default=8000)
+    args = parser.parse_args()
+    serve(host=args.host, port=args.port)
